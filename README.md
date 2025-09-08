@@ -3,7 +3,9 @@ Large language models (LLMs) serve as an active and promising field of generativ
 
 ## Contact
 If you have any questions on our work or implementation, feel free to reach out to [chengao23@mails.ucas.ac.cn](mailto:chengao23@mails.ucas.ac.cn)!
+
 If you find this repository useful, please consider giving a star ⭐ and cite our paper.
+
 ```
 @article{cheng2025re4,
   title={Re4: Scientific Computing Agent with Rewriting, Resolution, Review and Revision},
