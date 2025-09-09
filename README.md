@@ -1,8 +1,8 @@
 # Re4-Scientific-Computing-Agent-with-Rewriting-Resolution-Review-and-Revision
 The proposed agent, incorporating a "rewriting-resolution-review-revision" logical chain via three reasoning LLMs (functioning as the Consultant, Reviewer, and Programmer, respectively), is integrated in a collaborative and interactive manner.
+![schematic](schematic_re4.png)
 
 ## Project Structure
-![schematic](schematic_re4.png)
 ```
 src/
 ├── utils.py          # General tool functions
