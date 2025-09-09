@@ -2,6 +2,12 @@
 The proposed agent, incorporating a "rewriting-resolution-review-revision" logical chain via three reasoning LLMs (functioning as the Consultant, Reviewer, and Programmer, respectively), is integrated in a collaborative and interactive manner.
 ![schematic](schematic_re4.png)
 
+## Future work
+```
+1. collect and publish all datasets
+2. release streamlit version and employ langchain
+```
+
 ## Project Structure
 ```
 src/
