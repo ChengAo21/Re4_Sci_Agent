@@ -2,13 +2,15 @@
 The proposed agent, incorporating a "rewriting-resolution-review-revision" logical chain via three reasoning LLMs (functioning as the Consultant, Reviewer, and Programmer, respectively), is integrated in a collaborative and interactive manner.
 
 ## Project Structure
+```
 src/
-├── utils.py # General tool functions
-├── FileHandler.py # File operation
-├── code_executor.py # Code processing & execution  
-├── llm_agent.py # client configuration
-├── prompts_template.py # Prompt generation
-└── re4_Agent.py # Workflow
+├── utils.py          # General tool functions
+├── FileHandler.py    # File operation
+├── code_executor.py  # Code processing & execution  
+├── llm_agent.py      # Client configuration
+├── prompts_template.py  # Prompt generation
+└── re4_Agent.py      # Workflow
+```
 
 ## Contact
 If you have any questions on our work or implementation, feel free to reach out to [chengao23@mails.ucas.ac.cn](mailto:chengao23@mails.ucas.ac.cn)!
