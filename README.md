@@ -2,20 +2,29 @@
 The proposed agent, incorporating a "rewriting-resolution-review-revision" logical chain via three reasoning LLMs (functioning as the Consultant, Reviewer, and Programmer, respectively), is integrated in a collaborative and interactive manner.
 ![schematic](schematic_re4.png)
 
+For more details, see our arXiv preprint [arXiv:2508.20729](https://arxiv.org/abs/2508.20729)
+
 ## Future work
 ```
-1. release streamlit version and employ langchain
+- release streamlit version and employ langchain
 ```
 
 ## Project Structure
 ```
 src/
-├── utils.py          # General tool functions
-├── FileHandler.py    # File operation
-├── code_executor.py  # Code processing & execution  
-├── llm_agent.py      # Client configuration
+├── utils.py             # General tool functions
+├── FileHandler.py       # File operation
+├── code_executor.py     # Code processing & execution  
+├── llm_agent.py         # Client configuration
 ├── prompts_template.py  # Prompt generation
-└── re4_Agent.py      # Workflow
+└── re4_Agent.py         # Workflow
+```
+
+## Dataset Structure
+```
+├── PDEbench
+├── Hilbert
+└── Keyhole       
 ```
 
 ## Contact
