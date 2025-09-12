@@ -4,8 +4,7 @@ The proposed agent, incorporating a "rewriting-resolution-review-revision" logic
 
 ## Future work
 ```
-1. collect and publish all datasets
-2. release streamlit version and employ langchain
+1. release streamlit version and employ langchain
 ```
 
 ## Project Structure
