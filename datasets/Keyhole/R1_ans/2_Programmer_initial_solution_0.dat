@@ -1,0 +1,188 @@
+
+****************************************
+To solve this problem, we'll implement a systematic dimensional analysis approach to identify the optimal dimensionless group that best correlates with the keyhole aspect ratio (e*). The solution involves:
+
+1. Loading and preprocessing the data
+2. Setting up dimensional constraints using Buckingham Pi theorem
+3. Iterating over possible rational exponents to form dimensionless groups
+4. Evaluating each group's correlation with e* using linear regression in log-space
+5. Selecting the group with the highest R² value
+6. Visualizing and reporting results
+
+The solution follows these key steps:
+- Express the dimensionless group as a product of physical quantities raised to exponents
+- Solve dimensional constraints to reduce free variables
+- Iterate over rational exponents within [-3,3] in steps of 0.5
+- Compute R² for log-log regression of e* vs. dimensionless group
+- Visualize results with appropriate plots
+
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+
+# Load data and extract relevant columns
+file_path = "Q:/Work2/LLM_/test_Agent/dataset_keyhole.csv"
+df = pd.read_csv(file_path)
+
+# Extract required columns (0-indexed positions: 2,3,4,5,6,7,10) and target (last column)
+X = df.iloc[:, [2, 3, 4, 5, 6, 7, 10]].values  # Physical quantities
+y = df.iloc[:, -1].values  # Target e*
+
+# Column names for reference
+var_names = ['etaP', 'Vs', 'r0', 'alpha', 'rho', 'cp', 'Tl-T0']
+
+# Precompute logarithms for efficient calculations
+log_X = np.log(X)
+log_y = np.log(y)
+
+# Define rational exponent range [-3, 3] in steps of 0.5
+exponents = np.arange(-3, 3.1, 0.5)
+n = len(exponents)
+
+# Initialize tracking variables
+best_r2 = -np.inf
+best_exponents = None
+best_model = None
+best_log_Pi = None
+
+# Iterate over possible exponent values for free variables a and f
+for a in exponents:
+    for f in exponents:
+        # Calculate dependent exponents using dimensional constraints
+        e_val = -a
+        g_val = f
+        d_val = -3*a - 2*f - 1
+        c_val = a + 2*f + 2
+        
+        # Check if all exponents are within [-3,3] range
+        if not all(-3 <= x <= 3 for x in [c_val, d_val, e_val, g_val]):
+            continue
+            
+        # Construct full exponent vector [a, b=1, c, d, e, f, g]
+        exp_vec = np.array([a, 1, c_val, d_val, e_val, f, g_val])
+        
+        # Compute log of dimensionless group Π for all data points
+        log_Pi = log_X @ exp_vec
+        
+        # Prepare data for linear regression (log-log space)
+        X_reg = log_Pi.reshape(-1, 1)
+        
+        # Fit linear model
+        model = LinearRegression()
+        model.fit(X_reg, log_y)
+        r2 = model.score(X_reg, log_y)
+        
+        # Update best solution if improved R²
+        if r2 > best_r2:
+            best_r2 = r2
+            best_exponents = exp_vec
+            best_model = model
+            best_log_Pi = log_Pi
+
+# Convert best log_Pi to original space
+best_Pi = np.exp(best_log_Pi)
+
+# Generate predictions for visualization
+Pi_plot = np.linspace(best_Pi.min(), best_Pi.max(), 100)
+log_Pi_plot = np.log(Pi_plot)
+log_e_pred = best_model.predict(log_Pi_plot.reshape(-1, 1))
+e_pred = np.exp(log_e_pred)
+
+# Create readable expression of dimensionless group
+terms = []
+for i, name in enumerate(var_names):
+    exp = best_exponents[i]
+    if np.abs(exp) > 1e-5:  # Skip near-zero exponents
+        if np.isclose(exp, int(exp)):
+            exp_str = f"{int(exp)}" if abs(exp) != 1 else ""
+        else:
+            frac = np.round(exp * 2) / 2  # Convert to nearest 0.5
+            num = int(frac * 2)
+            den = 2
+            exp_str = f"^{{{num}/{den}}}" if num != den else ""
+        terms.append(f"{name}{exp_str}")
+
+expr = " \\cdot ".join(terms)
+
+# Print results
+print("Optimal Dimensionless Group:")
+print(f"Π = {expr}")
+print(f"R² = {best_r2:.6f}")
+print("\nExponent Details:")
+for i, name in enumerate(var_names):
+    print(f"{name}: {best_exponents[i]:.4f}")
+
+# Create visualizations
+plt.figure(figsize=(10, 8))
+
+# Log-log plot
+plt.subplot(2, 1, 1)
+plt.scatter(best_Pi, y, alpha=0.6, edgecolor='k')
+plt.plot(Pi_plot, e_pred, 'r-', linewidth=2)
+plt.xscale('log')
+plt.yscale('log')
+plt.xlabel('Dimensionless Group (Π)')
+plt.ylabel('Keyhole Aspect Ratio (e*)')
+plt.title('Log-Log Correlation')
+plt.grid(True, which="both", ls="-")
+
+# Linear-scale plot
+plt.subplot(2, 1, 2)
+plt.scatter(best_Pi, y, alpha=0.6, edgecolor='k')
+plt.plot(Pi_plot, e_pred, 'r-', linewidth=2)
+plt.xlabel('Dimensionless Group (Π)')
+plt.ylabel('Keyhole Aspect Ratio (e*)')
+plt.title('Linear Correlation')
+plt.grid(True)
+
+plt.tight_layout()
+plt.savefig('dimensionless_group_correlation.png')
+```
+
+**Technical Explanation:**
+
+1. **Dimensional Analysis Framework:**
+   - Uses Buckingham Pi theorem to form dimensionless groups
+   - Physical quantities expressed in fundamental dimensions (M, L, T, Θ)
+   - Exponents constrained by dimensional homogeneity:
+     """
+     M: a + e = 0
+     L: 2a + c + 2d - 3e + 2f = 0
+     T: -3a -1 -d -2f = 0
+     Θ: -f + g = 0
+     """
+   - Solved to express exponents as:
+     """
+     e = -a
+     g = f
+     d = -3a - 2f -1
+     c = a + 2f + 2
+     """
+
+2. **Optimization Strategy:**
+   - Free variables `a` and `f` iterated over rational exponents [-3, -2.5,...,3]
+   - Dependent exponents calculated from constraints
+   - Only valid exponents within [-3,3] range considered
+
+3. **Regression Methodology:**
+   - Uses linear regression in log-log space: log(e*) ~ log(Π)
+   - Equivalent to power-law relationship: e* = k·Π^m
+   - R² metric quantifies goodness-of-fit
+   - Efficient computation using vectorized operations
+
+4. **Code Optimization:**
+   - Precomputes logarithms for efficient exponentiation
+   - Vectorized computation of dimensionless groups
+   - Early skipping of invalid exponent combinations
+   - Efficient storage of only best solution
+
+**Output Interpretation:**
+- The code outputs the optimal dimensionless group expression
+- Reports R² value quantifying explanatory power
+- Visualizes correlation in both log-log and linear scales
+- Saves plot showing relationship between Π and e*
+
+The solution systematically explores physically meaningful dimensionless groups while efficiently evaluating their correlation strength with the target variable. The log-log regression approach is particularly appropriate for power-law relationships common in dimensional analysis.
+****************************************

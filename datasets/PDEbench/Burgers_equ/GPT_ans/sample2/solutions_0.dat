@@ -1,0 +1,190 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.sparse import diags
+from scipy.sparse.linalg import spsolve
+
+# Technical explanation:
+# We solve the 1-D viscous Burgers' equation:
+#    u_t + u u_x = nu u_xx
+# on domain x in [-1,1], t in [0,1], with initial condition u(x,0) = -sin(pi x)
+# and Dirichlet BCs u(-1,t) = u(1,t) = 0.
+#
+# We choose Plan 2: an IMEX scheme with Crank-Nicolson for diffusion (implicit)
+# and explicit treatment of nonlinear convection term.
+#
+# This approach allows larger stable time steps than fully explicit schemes,
+# while controlling stiffness from diffusion.
+#
+# Spatial derivatives are discretized with second-order central differences.
+# The nonlinear convection term u u_x is evaluated explicitly at previous time step.
+#
+# At each time step, we solve a linear tridiagonal system for u^{n+1}.
+#
+# Boundary conditions are enforced strongly at each time step.
+#
+# This method balances stability, accuracy, and computational efficiency,
+# and reduces oscillations by implicit diffusion treatment.
+#
+# We plot:
+# 1) Contour plot of velocity u(x,t) over space-time domain.
+# 2) Velocity profiles u(x) at selected time snapshots.
+
+# Parameters
+nu = 0.01 / np.pi  # viscosity
+x_start, x_end = -1.0, 1.0
+t_start, t_end = 0.0, 1.0
+
+# Discretization parameters
+Nx = 201  # number of spatial points (including boundaries)
+Nt = 5000  # number of time steps
+
+x = np.linspace(x_start, x_end, Nx)
+dx = x[1] - x[0]
+
+dt = (t_end - t_start) / Nt
+
+# CFL condition check for convection stability (informative)
+# max velocity magnitude initially ~1, so dt <= dx / max|u|
+# diffusion stability for explicit ~ dx^2/(2*nu), but we treat diffusion implicitly
+# so dt mainly limited by convection CFL
+max_u = 1.0
+cfl_conv = max_u * dt / dx
+if cfl_conv > 1.0:
+    # Warn user (not printed per instructions), but we reduce dt if needed
+    dt = 0.8 * dx / max_u
+    Nt = int(np.ceil((t_end - t_start) / dt))
+    dt = (t_end - t_start) / Nt  # adjust dt exactly
+
+# Initial condition
+u = -np.sin(np.pi * x)
+
+# Enforce boundary conditions at t=0
+u[0] = 0.0
+u[-1] = 0.0
+
+# Prepare storage for solution snapshots for plotting
+# Store solution every N_snap steps
+N_snap = Nt // 10
+snapshots = []
+time_snapshots = []
+
+# Precompute coefficients for Crank-Nicolson diffusion implicit matrix
+# Discretize u_xx with central difference:
+# u_xx_i ≈ (u_{i-1} - 2 u_i + u_{i+1}) / dx^2
+#
+# Crank-Nicolson scheme for diffusion term:
+# (u^{n+1} - u^n)/dt + u^n u_x^n = nu/2 * (u_xx^{n+1} + u_xx^n)
+#
+# Rearranged:
+# (I - r/2 * A) u^{n+1} = (I + r/2 * A) u^n - dt * (u^n u_x^n)
+#
+# where r = nu * dt / dx^2,
+# A is the second derivative matrix with Dirichlet BCs.
+
+r = nu * dt / dx**2
+
+# Construct sparse matrix A for second derivative with Dirichlet BCs
+# Interior points: i=1,...,Nx-2
+diagonals = [
+    np.ones(Nx-3),       # lower diagonal
+    -2 * np.ones(Nx-2),  # main diagonal
+    np.ones(Nx-3)        # upper diagonal
+]
+offsets = [-1, 0, 1]
+A = diags(diagonals, offsets, shape=(Nx-2, Nx-2), format='csc')
+
+# Left matrix: (I - r/2 * A)
+LHS = diags([np.ones(Nx-2)], [0], shape=(Nx-2, Nx-2), format='csc') - (r/2) * A
+
+# Right matrix: (I + r/2 * A)
+RHS_mat = diags([np.ones(Nx-2)], [0], shape=(Nx-2, Nx-2), format='csc') + (r/2) * A
+
+# Function to compute u_x at interior points with central difference
+def compute_ux(u):
+    ux = np.zeros_like(u)
+    # Central difference for interior points
+    ux[1:-1] = (u[2:] - u[:-2]) / (2 * dx)
+    # One-sided difference at boundaries (not used since BC fixed)
+    ux[0] = (u[1] - u[0]) / dx
+    ux[-1] = (u[-1] - u[-2]) / dx
+    return ux
+
+# Time stepping loop
+u_all = np.zeros((Nt+1, Nx))
+u_all[0, :] = u.copy()
+
+for n in range(Nt):
+    # Compute convection term u u_x at time n (explicit)
+    ux = compute_ux(u)
+    conv_term = u * ux  # nonlinear convection term at time n
+
+    # Right hand side vector for interior points
+    b = RHS_mat.dot(u[1:-1]) - dt * conv_term[1:-1]
+
+    # Enforce Dirichlet BCs in RHS vector
+    # The matrix A corresponds to interior points only,
+    # so boundary values affect RHS as:
+    # For i=1 (first interior point), add (r/2)*u_0^{n+1} and (r/2)*u_0^{n}
+    # For i=Nx-2 (last interior point), add (r/2)*u_{Nx-1}^{n+1} and (r/2)*u_{Nx-1}^{n}
+    # But since BCs are zero, these terms vanish.
+
+    # Solve linear system for u^{n+1} interior points
+    u_interior = spsolve(LHS, b)
+
+    # Update solution vector
+    u[1:-1] = u_interior
+
+    # Enforce boundary conditions
+    u[0] = 0.0
+    u[-1] = 0.0
+
+    # Store solution
+    u_all[n+1, :] = u.copy()
+
+    # Store snapshots for plotting
+    if (n+1) % N_snap == 0 or n == Nt-1:
+        snapshots.append(u.copy())
+        time_snapshots.append(t_start + (n+1)*dt)
+
+# Convert snapshots to numpy array for plotting
+snapshots = np.array(snapshots)
+time_snapshots = np.array(time_snapshots)
+
+# Plot 1: Contour plot of velocity u(x,t)
+plt.figure(figsize=(8, 6))
+X, T = np.meshgrid(x, np.linspace(t_start, t_end, Nt+1))
+cp = plt.contourf(X, T, u_all, levels=50, cmap='jet')
+plt.colorbar(cp, label='Velocity u(x,t)')
+plt.xlabel('x')
+plt.ylabel('t')
+plt.title('Contour plot of velocity u(x,t) for 1D Burgers equation')
+plt.tight_layout()
+plt.savefig('burgers_velocity_contour.png')
+plt.close()
+
+# Plot 2: Velocity profiles at selected time snapshots
+plt.figure(figsize=(8, 6))
+for i, t_snap in enumerate(time_snapshots):
+    plt.plot(x, snapshots[i], label=f't={t_snap:.3f}')
+plt.xlabel('x')
+plt.ylabel('Velocity u(x,t)')
+plt.title('Velocity profiles at selected times')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig('burgers_velocity_profiles.png')
+plt.close()
+
+# Detailed result printing within code architecture
+print("1D Burgers equation solved with IMEX Crank-Nicolson scheme.")
+print(f"Domain: x in [{x_start}, {x_end}], t in [{t_start}, {t_end}]")
+print(f"Spatial points: {Nx}, Time steps: {Nt}, dt: {dt:.5e}, dx: {dx:.5e}")
+print(f"Viscosity nu = {nu:.5e}")
+print(f"Stored {len(time_snapshots)} solution snapshots for plotting.")
+print("Figures saved as 'burgers_velocity_contour.png' and 'burgers_velocity_profiles.png'.")
+```
+
+****************************************

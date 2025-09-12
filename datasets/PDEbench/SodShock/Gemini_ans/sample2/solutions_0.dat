@@ -1,0 +1,313 @@
+
+****************************************
+```python
+# Import necessary libraries
+import numpy as np
+import matplotlib.pyplot as plt
+import os # Used for saving the plot
+
+# --- Technical Explanation for the Solving Algorithm ---
+# The chosen algorithm is the Finite Volume Method with the HLLC (Harten-Lax-van Leer-Contact)
+# approximate Riemann solver. This method is well-suited for hyperbolic conservation laws
+# like the Euler equations, especially when dealing with discontinuities (shocks, contact
+# discontinuities, rarefaction waves) as in the Sod shock tube problem.
+
+# 1.  Finite Volume Discretization:
+#     The spatial domain [0,1] is divided into N_cells control volumes (cells).
+#     The conserved variables U = [rho, rho*u, rho*E]^T are stored as cell-averaged values.
+#     The governing equations are integrated over each cell, leading to an update rule:
+#     U_i^{n+1} = U_i^n - (dt/dx) * (F_{i+1/2} - F_{i-1/2}),
+#     where U_i is the cell-averaged conserved variable in cell i, dt is the time step,
+#     dx is the cell width, and F_{i+1/2} and F_{i-1/2} are the numerical fluxes
+#     at the right and left interfaces of cell i, respectively. This formulation
+#     inherently ensures conservation of mass, momentum, and energy.
+
+# 2.  HLLC Riemann Solver:
+#     The core of the method is the HLLC Riemann solver, which computes the numerical
+#     flux F at each cell interface. A Riemann problem is defined by the left (UL)
+#     and right (UR) states at an interface. The HLLC solver is an approximate Riemann
+#     solver that improves upon the simpler HLL (Harten-Lax-van Leer) solver by
+#     explicitly accounting for the contact discontinuity, which is crucial for
+#     accurate resolution of the Sod shock tube problem.
+#     The HLLC solver estimates three wave speeds: S_L (leftmost wave), S_R (rightmost wave),
+#     and S_star (speed of the contact discontinuity). These wave speeds define four
+#     regions in the x-t plane (left, left-star, right-star, right). The flux is then
+#     computed piecewise based on the sign of these wave speeds relative to zero.
+#     The wave speed estimation for S_L and S_R uses an approximate pressure in the
+#     star region (p_star_guess) to account for the non-linear nature of shocks.
+#     S_star is derived from momentum conservation across the contact.
+#     The HLLC flux is chosen based on which region (left, left-star, right-star, right)
+#     the origin (x=0) falls into, effectively determining the flux that crosses the interface.
+
+# 3.  Time Integration:
+#     An explicit Euler method is used for time integration. The time step (dt) is
+#     determined by the CFL condition: dt = CFL * dx / max_wave_speed.
+#     The maximum wave speed is calculated across all cells as max(|u| + c), where
+#     c is the local speed of sound. This condition ensures numerical stability.
+
+# 4.  Boundary Conditions:
+#     Transmissive (outflow) boundary conditions are applied. This means that the
+#     ghost cells (cells outside the computational domain) are assigned the values
+#     of the adjacent interior computational cells. This allows waves to exit the
+#     domain without reflection.
+
+# 5.  Primitive and Conserved Variable Conversion:
+#     Helper functions are used to convert between primitive variables (rho, u, p)
+#     and conserved variables (rho, rho*u, rho*E) as needed for initialization,
+#     flux computation, and post-processing. The total specific energy E is defined as
+#     E = 0.5 * u^2 + p / ((gamma - 1) * rho).
+
+# The HLLC scheme is chosen for its balance of accuracy and computational efficiency.
+# It is robust for problems involving strong shocks and contact discontinuities,
+# providing a good compromise between the simplicity of HLL and the complexity of
+# exact Riemann solvers or higher-order WENO schemes.
+
+# --- Constants and Parameters ---
+gamma = 1.4  # Ratio of specific heats for ideal gas
+CFL = 0.8    # Courant-Friedrichs-Lewy number for stability (should be < 1 for explicit methods)
+N_cells = 200 # Number of computational cells
+x_min = 0.0  # Left boundary of the domain
+x_max = 1.0  # Right boundary of the domain
+t_final = 0.2 # Final time for simulation
+
+# --- Discretization ---
+dx = (x_max - x_min) / N_cells
+x_centers = np.linspace(x_min + 0.5 * dx, x_max - 0.5 * dx, N_cells)
+
+# --- Helper Functions for State Conversion ---
+
+def primitive_to_conserved(rho, u, p):
+    # Calculates conserved variables from primitive variables
+    # Conserved variables: U = [rho, rho*u, rho*E]
+    # Total specific energy E = 0.5 * u^2 + p / ((gamma - 1) * rho)
+    rho_u = rho * u
+    rho_E = rho * (0.5 * u**2 + p / ((gamma - 1) * rho))
+    return np.array([rho, rho_u, rho_E])
+
+def conserved_to_primitive(U):
+    # Calculates primitive variables from conserved variables
+    # Conserved variables: U = [rho, rho_u, rho_E]
+    # Primitive variables: rho, u, p
+    rho = U[0]
+    u = U[1] / rho
+    # Pressure calculation: p = (gamma - 1) * (rho_E - 0.5 * rho_u^2 / rho)
+    p = (gamma - 1) * (U[2] - 0.5 * U[1]**2 / rho)
+    # Numerical safeguard: ensure pressure is non-negative
+    p = np.maximum(p, 1e-12) # Small positive value to prevent negative pressure
+    return np.array([rho, u, p])
+
+def compute_flux(U_conserved):
+    # Computes the physical flux vector F from conserved variables
+    # F = [rho*u, rho*u^2 + p, (rho*E + p)*u]
+    rho, u, p = conserved_to_primitive(U_conserved)
+    rho_u = U_conserved[1] # Momentum (rho*u)
+    rho_E = U_conserved[2] # Total energy (rho*E)
+    
+    flux_rho = rho_u
+    flux_rho_u = rho_u * u + p
+    flux_rho_E = (rho_E + p) * u
+    return np.array([flux_rho, flux_rho_u, flux_rho_E])
+
+# --- HLLC Riemann Solver ---
+def hllc_riemann_solver(UL, UR, gamma):
+    # UL, UR are conserved variable arrays for left and right states at an interface
+    
+    # Convert conserved to primitive variables for both states
+    rho_L, u_L, p_L = conserved_to_primitive(UL)
+    rho_R, u_R, p_R = conserved_to_primitive(UR)
+
+    # Calculate speed of sound for both states
+    c_L = np.sqrt(gamma * p_L / rho_L)
+    c_R = np.sqrt(gamma * p_R / rho_R)
+
+    # Estimate pressure in the star region (p_star_guess) for wave speed estimation
+    # This is a common approximation used in HLLC for robust wave speed calculation.
+    p_star_guess = 0.5 * (p_L + p_R) + 0.5 * (u_L - u_R) * (rho_L * c_L + rho_R * c_R)
+    p_star_guess = np.maximum(1e-12, p_star_guess) # Ensure positive pressure
+
+    # Calculate q_L and q_R factors for shock wave speed estimation
+    q_L = 1.0
+    if p_star_guess > p_L:
+        q_L = np.sqrt(1 + (gamma + 1)/(2*gamma) * (p_star_guess/p_L - 1))
+    
+    q_R = 1.0
+    if p_star_guess > p_R:
+        q_R = np.sqrt(1 + (gamma + 1)/(2*gamma) * (p_star_guess/p_R - 1))
+
+    # Estimate the fastest left (S_L) and right (S_R) wave speeds
+    S_L = u_L - c_L * q_L
+    S_R = u_R + c_R * q_R
+
+    # Calculate the contact discontinuity speed (S_star)
+    # This formula is derived from momentum conservation across the contact.
+    denominator = (rho_L * (S_L - u_L) - rho_R * (S_R - u_R))
+    # Add a small epsilon to denominator to prevent division by zero in edge cases
+    S_star = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / \
+             (denominator + 1e-12 * np.sign(denominator) if np.abs(denominator) < 1e-12 else denominator)
+
+    # Compute the physical fluxes for the left and right states
+    F_L = compute_flux(UL)
+    F_R = compute_flux(UR)
+
+    # Extract total specific energies for left and right states
+    E_L = UL[2] / UL[0]
+    E_R = UR[2] / UR[0]
+
+    # Calculate the total specific energies in the star regions (E_star_L, E_star_R)
+    E_star_L = E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L)))
+    E_star_R = E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R)))
+
+    # Calculate densities in the star regions (rho_star_L, rho_star_R)
+    rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star)
+    rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star)
+
+    # Construct the conserved variable vectors for the star regions (U_star_L, U_star_R)
+    U_star_L = np.array([rho_star_L, rho_star_L * S_star, rho_star_L * E_star_L])
+    U_star_R = np.array([rho_star_R, rho_star_R * S_star, rho_star_R * E_star_R])
+
+    # Determine the HLLC flux based on the wave speeds
+    if S_L >= 0:
+        # All waves are moving to the right, so the flux is F_L
+        F_HLLC = F_L
+    elif S_R <= 0:
+        # All waves are moving to the left, so the flux is F_R
+        F_HLLC = F_R
+    elif S_L < 0 and S_star >= 0:
+        # Left wave moves left, contact and right wave move right or are stationary
+        # The flux is determined by the left state and the left-star state
+        F_HLLC = F_L + S_L * (U_star_L - UL)
+    elif S_star < 0 and S_R > 0:
+        # Left wave and contact move left or are stationary, right wave moves right
+        # The flux is determined by the right state and the right-star state
+        F_HLLC = F_R + S_R * (U_star_R - UR)
+    else:
+        # This case should ideally not be reached if wave speeds are correctly ordered
+        # and the physical conditions are valid. It indicates an issue with wave speed
+        # ordering or an extreme state.
+        raise ValueError("HLLC solver encountered an unhandled wave configuration. Check wave speed ordering.")
+        
+    return F_HLLC
+
+# --- Initial Conditions (Sod Shock Tube Problem) ---
+# U_initial is a 3xN_cells array, where each row corresponds to a conserved variable
+# (rho, rho*u, rho*E) and each column corresponds to a cell.
+U_initial = np.zeros((3, N_cells))
+
+# Define the left state (0 < x <= 0.5)
+rho_L_init = 1.0
+u_L_init = 0.0
+p_L_init = 1.0
+U_L_init_conserved = primitive_to_conserved(rho_L_init, u_L_init, p_L_init)
+
+# Define the right state (0.5 < x < 1)
+rho_R_init = 0.125
+u_R_init = 0.0
+p_R_init = 0.1
+U_R_init_conserved = primitive_to_conserved(rho_R_init, u_R_init, p_R_init)
+
+# Apply initial conditions to the computational cells
+for i in range(N_cells):
+    if x_centers[i] <= 0.5:
+        U_initial[:, i] = U_L_init_conserved
+    else:
+        U_initial[:, i] = U_R_init_conserved
+
+# Initialize the current state of conserved variables and time
+U = U_initial.copy()
+t = 0.0
+iteration = 0
+
+# --- Main Simulation Loop ---
+print("Starting Euler Equations Simulation (HLLC Scheme)")
+print(f"Domain: [{x_min}, {x_max}], Number of cells: {N_cells}, dx: {dx:.4f}")
+print(f"Final time: {t_final}, CFL: {CFL}")
+
+while t < t_final:
+    # Calculate time step (dt) based on the CFL condition
+    # dt = CFL * dx / max_wave_speed
+    # max_wave_speed = max(|u| + c), where c is the local speed of sound
+    rho_current, u_current, p_current = conserved_to_primitive(U)
+    c_current = np.sqrt(gamma * p_current / rho_current)
+    max_wave_speed = np.max(np.abs(u_current) + c_current)
+    
+    dt = CFL * dx / max_wave_speed
+    
+    # Adjust dt to ensure we don't overshoot the final time
+    if t + dt > t_final:
+        dt = t_final - t
+    
+    # Prepare extended array with ghost cells for boundary conditions
+    U_ext = np.zeros((3, N_cells + 2))
+    U_ext[:, 1:-1] = U # Copy current U into the interior cells
+    
+    # Apply outflow boundary conditions
+    # Left ghost cell takes the value of the first computational cell
+    U_ext[:, 0] = U[:, 0]
+    # Right ghost cell takes the value of the last computational cell
+    U_ext[:, -1] = U[:, -1]
+
+    # Compute numerical fluxes at all N_cells + 1 interfaces using the HLLC solver
+    # F_numerical[i] represents the flux at the interface between U_ext[:, i] and U_ext[:, i+1]
+    F_numerical = np.zeros((3, N_cells + 1))
+    for i in range(N_cells + 1):
+        UL_interface = U_ext[:, i]
+        UR_interface = U_ext[:, i+1]
+        F_numerical[:, i] = hllc_riemann_solver(UL_interface, UR_interface, gamma)
+
+    # Update conserved variables using the finite volume method (explicit Euler)
+    # U_i^{n+1} = U_i^n - (dt/dx) * (F_{i+1/2} - F_{i-1/2})
+    U_new = np.zeros_like(U)
+    for i in range(N_cells):
+        F_left_interface = F_numerical[:, i]   # Flux at the left interface of cell i
+        F_right_interface = F_numerical[:, i+1] # Flux at the right interface of cell i
+        U_new[:, i] = U[:, i] - (dt / dx) * (F_right_interface - F_left_interface)
+    
+    # Update the state and time
+    U = U_new
+    t += dt
+    iteration += 1
+    
+    # Print progress periodically
+    if iteration % 50 == 0 or t >= t_final:
+        print(f"Time: {t:.4f}/{t_final:.4f}, dt: {dt:.6f}, Iteration: {iteration}")
+
+print(f"Simulation finished at t = {t:.4f} after {iteration} iterations.")
+
+# --- Post-processing and Plotting ---
+# Convert the final conserved variables back to primitive variables for plotting
+rho_final, u_final, p_final = conserved_to_primitive(U)
+
+# Create a single figure with three subplots to display density, velocity, and pressure
+fig, axs = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+fig.suptitle(f'Sod Shock Tube Problem at t = {t_final:.2f} (HLLC Scheme, N={N_cells})', fontsize=16)
+
+# Plot Density (rho)
+axs[0].plot(x_centers, rho_final, 'b-', label='Density (rho)')
+axs[0].set_ylabel('Density (rho)')
+axs[0].grid(True)
+axs[0].legend()
+
+# Plot Velocity (u)
+axs[1].plot(x_centers, u_final, 'r-', label='Velocity (u)')
+axs[1].set_ylabel('Velocity (u)')
+axs[1].grid(True)
+axs[1].legend()
+
+# Plot Pressure (p)
+axs[2].plot(x_centers, p_final, 'g-', label='Pressure (p)')
+axs[2].set_xlabel('Position (x)')
+axs[2].set_ylabel('Pressure (p)')
+axs[2].grid(True)
+axs[2].legend()
+
+# Adjust layout to prevent titles/labels from overlapping
+plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+
+# Define the filename for the plot
+plot_filename = "sod_shock_tube_hllc.png"
+
+# Save the plot to a file without displaying it
+plt.savefig(plot_filename)
+print(f"Plot saved as {plot_filename}")
+```
+****************************************

@@ -1,0 +1,278 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from scipy import sparse
+from scipy.sparse import linalg
+
+# Technical explanation for the solving algorithm:
+# The chosen algorithm is the Finite Difference Method (FDM) applied to the 2D Poisson-Boltzmann (Helmholtz) equation
+# on a complex domain with holes.
+#
+# 1. Discretization: The continuous domain Omega = [-1,1]^2 is discretized into a uniform Cartesian grid with grid spacing h.
+#    The Laplacian operator Delta u = d^2u/dx^2 + d^2u/dy^2 is approximated using the standard five-point central difference stencil:
+#    d^2u/dx^2 approx (u_{i+1,j} - 2u_{i,j} + u_{i-1,j}) / h^2
+#    d^2u/dy^2 approx (u_{i,j+1} - 2u_{i,j} + u_{i,j-1}) / h^2
+#    Substituting these into the PDE -Delta u + k^2 u = f(x,y) yields:
+#    -((u_{i+1,j} - 2u_{i,j} + u_{i-1,j}) / h^2 + (u_{i,j+1} - 2u_{i,j} + u_{i,j-1}) / h^2) + k^2 u_{i,j} = f_{i,j}
+#    Rearranging terms to solve for u_{i,j}:
+#    (4u_{i,j} - u_{i+1,j} - u_{i-1,j} - u_{i,j+1} - u_{i,j-1}) / h^2 + k^2 u_{i,j} = f_{i,j}
+#    Multiplying by h^2 and grouping u_{i,j} terms:
+#    (4 + k^2 h^2) u_{i,j} - u_{i+1,j} - u_{i-1,j} - u_{i,j+1} - u_{i,j-1} = h^2 f_{i,j}
+#    This equation relates the value of u at a grid point (i,j) to its four immediate neighbors and the source term f_{i,j}.
+#
+# 2. Domain Handling and Masking: The presence of circular holes makes the domain non-rectangular. This is handled by:
+#    - Masking: A boolean mask is created to identify grid points that fall inside the removed circles. These points are
+#      excluded from the computational domain where the PDE is solved.
+#    - Boundary Conditions:
+#      - Outer Boundary: Grid points lying on the perimeter of the square domain [-1,1]^2 are assigned the Dirichlet
+#        boundary condition u=0.2.
+#      - Hole Boundaries: Grid points that are *inside* the holes are assigned the Dirichlet boundary condition u=1.
+#        While these points are not part of the solution domain, their values are crucial for the FDM stencil of their
+#        neighboring points that *are* in the solution domain. This effectively imposes the u=1 condition on the
+#        boundaries of the holes.
+#
+# 3. Linear System Assembly: The discretized equations for all "unknown" grid points (i.e., points within the valid domain
+#    that are not on the outer boundary) are assembled into a large system of linear equations of the form A*u_vec = b_vec.
+#    - Each unknown grid point (i,j) is mapped to a unique 1D index in the vector u_vec.
+#    - For each unknown point, the FDM stencil contributes coefficients to the matrix A (e.g., (4 + k^2 h^2) on the diagonal,
+#      -1 for valid neighbors).
+#    - Contributions from known boundary values (outer square boundary or points inside holes) are moved to the right-hand
+#      side vector b_vec. The source term h^2 f_{i,j} also contributes to b_vec.
+#    - Optimization: Instead of a dense NumPy array, a `scipy.sparse.lil_matrix` is used for matrix assembly. This
+#      significantly reduces memory usage and improves performance for large grids by only storing non-zero elements.
+#      After assembly, it's converted to `scipy.sparse.csr_matrix` for efficient solving.
+#
+# 4. Solution: The resulting sparse linear system A*u_vec = b_vec is solved using `scipy.sparse.linalg.spsolve`. This
+#    function is designed to efficiently solve sparse systems, leveraging the sparse structure of the matrix.
+#
+# 5. Post-processing: The 1D solution vector u_vec is reshaped back into a 2D grid. For visualization, points inside the
+#    holes are set to NaN so they appear as empty regions, clearly distinguishing the computational domain. The solution
+#    is then visualized using contour plots.
+
+# Explanation of specific code optimizations:
+# 1. Modularization: The code has been refactored into several functions (e.g., create_masks, map_indices, assemble_system,
+#    solve_system, post_process_solution, plot_solution). This improves code readability, maintainability, and reusability
+#    by breaking down the problem into smaller, manageable components.
+# 2. Sparse Matrix Usage: The most significant optimization is the transition from a dense NumPy array for the system matrix
+#    (A_matrix) to a `scipy.sparse.lil_matrix` during assembly and then to `scipy.sparse.csr_matrix` for solving.
+#    - `lil_matrix` (List of Lists) is efficient for incrementally building a sparse matrix by assigning elements.
+#    - `csr_matrix` (Compressed Sparse Row) is highly optimized for matrix-vector products and solving linear systems.
+#    - This change drastically reduces memory consumption for large grids (as only non-zero elements are stored) and
+#      improves the computational efficiency of the solver, allowing for larger problem sizes.
+# 3. `scipy.sparse.linalg.spsolve`: This specialized solver is used instead of `numpy.linalg.solve`. It leverages the
+#    sparse structure of the matrix, leading to much faster solution times for large sparse systems.
+
+# --- Problem Parameters and Definitions ---
+
+# Define problem parameters
+mu1 = 1
+mu2 = 4
+k_val = 8
+A_val = 10
+
+# Define the source function f(x,y) based on the problem description
+# f(x,y) = A * (mu1^2 + mu2^2 + x^2 + y^2) * sin(mu1*pi*x) * sin(mu2*pi*y)
+def calculate_f(X, Y, A_val, mu1, mu2):
+    # Calculates the source term f(x,y) for the Poisson-Boltzmann equation.
+    return A_val * (mu1**2 + mu2**2 + X**2 + Y**2) * np.sin(mu1 * np.pi * X) * np.sin(mu2 * np.pi * Y)
+
+# Define circle properties (center_x, center_y, radius)
+circles = [
+    (0.5, 0.5, 0.2),
+    (0.4, -0.4, 0.4),
+    (-0.2, -0.7, 0.1),
+    (-0.6, 0.5, 0.3)
+]
+
+# Grid setup
+nx = 150  # Number of grid points in x-direction
+ny = 150  # Number of grid points in y-direction
+x_coords = np.linspace(-1, 1, nx)
+y_coords = np.linspace(-1, 1, ny)
+h = x_coords[1] - x_coords[0] # Grid spacing
+
+# Create meshgrid for coordinates
+X, Y = np.meshgrid(x_coords, y_coords)
+
+# --- Helper Functions for Domain and System Setup ---
+
+def create_masks(X, Y, circles, nx, ny):
+    # Creates boolean masks for different regions of the domain.
+    # is_inside_hole: True if point is inside any circle
+    is_inside_hole = np.zeros((ny, nx), dtype=bool)
+    for cx, cy, r in circles:
+        dist_sq = (X - cx)**2 + (Y - cy)**2
+        is_inside_hole = np.logical_or(is_inside_hole, dist_sq <= r**2)
+
+    # is_outer_boundary: True if point is on the outer square boundary
+    is_outer_boundary = np.zeros((ny, nx), dtype=bool)
+    is_outer_boundary[0, :] = True
+    is_outer_boundary[-1, :] = True
+    is_outer_boundary[:, 0] = True
+    is_outer_boundary[:, -1] = True
+
+    # is_valid_domain_point: True if point is not inside any hole
+    is_valid_domain_point = ~is_inside_hole
+
+    # is_unknown_point: True if point is in the valid domain AND not on the outer boundary
+    is_unknown_point = np.logical_and(is_valid_domain_point, ~is_outer_boundary)
+
+    return is_inside_hole, is_outer_boundary, is_valid_domain_point, is_unknown_point
+
+def map_indices(is_unknown_point, ny, nx):
+    # Creates a mapping from 2D (i,j) grid indices to 1D array index for the linear system.
+    row_map = {} # Maps (i,j) to k_idx
+    col_map = {} # Maps k_idx to (i,j)
+    k_idx = 0
+    for i in range(ny):
+        for j in range(nx):
+            if is_unknown_point[i,j]:
+                row_map[(i,j)] = k_idx
+                col_map[k_idx] = (i,j)
+                k_idx += 1
+    num_unknowns = k_idx
+    return row_map, col_map, num_unknowns
+
+def assemble_system(nx, ny, h, k_val, f_grid, u_initial_grid, is_unknown_point, row_map, num_unknowns):
+    # Assembles the sparse linear system A * u_vec = b_vec.
+    # A_matrix is initialized as a scipy.sparse.lil_matrix for efficient construction.
+    A_matrix = sparse.lil_matrix((num_unknowns, num_unknowns))
+    b_vector = np.zeros(num_unknowns)
+
+    for i in range(ny):
+        for j in range(nx):
+            if is_unknown_point[i,j]:
+                current_k_idx = row_map[(i,j)]
+
+                # Diagonal term for u_{i,j} from (4 + k^2 h^2) u_{i,j}
+                A_matrix[current_k_idx, current_k_idx] = (4 + k_val**2 * h**2)
+                
+                # Right-hand side term from h^2 f_{i,j}
+                b_vector[current_k_idx] = h**2 * f_grid[i,j]
+
+                # Contributions from neighbors (u_{i+1,j}, u_{i-1,j}, u_{i,j+1}, u_{i,j-1})
+                neighbors = [(i-1, j), (i+1, j), (i, j-1), (i, j+1)]
+                for ni, nj in neighbors:
+                    # Check if neighbor is within grid bounds
+                    if 0 <= ni < ny and 0 <= nj < nx:
+                        if is_unknown_point[ni,nj]:
+                            # Neighbor is also an unknown point, add -1 to A_matrix
+                            A_matrix[current_k_idx, row_map[(ni,nj)]] = -1
+                        else:
+                            # Neighbor is a known boundary point (either on outer boundary or inside a hole)
+                            # Its value is known from u_initial_grid.
+                            # The term -u_neighbor on the LHS moves to the RHS as +u_neighbor.
+                            b_vector[current_k_idx] += u_initial_grid[ni,nj]
+                    # If neighbor is out of bounds, it's implicitly handled by the outer_boundary condition
+                    # and its value is already incorporated into u_initial_grid[is_outer_boundary]
+    
+    # Convert to CSR format for efficient solving
+    A_matrix = A_matrix.tocsr()
+    return A_matrix, b_vector
+
+def solve_system(A_matrix, b_vector):
+    # Solves the sparse linear system using scipy.sparse.linalg.spsolve.
+    print("Solving sparse linear system using scipy.sparse.linalg.spsolve...")
+    u_flat_solution = linalg.spsolve(A_matrix, b_vector)
+    print("Linear system solved.")
+    return u_flat_solution
+
+def post_process_solution(u_flat_solution, u_initial_grid, col_map, is_inside_hole):
+    # Populates the 2D solution grid with solved values and prepares for plotting.
+    u_solution_grid = np.copy(u_initial_grid) # Start with boundary conditions
+    for current_k_idx in range(len(u_flat_solution)):
+        i, j = col_map[current_k_idx]
+        u_solution_grid[i,j] = u_flat_solution[current_k_idx]
+
+    # For plotting, set points inside holes to NaN so they appear as empty regions.
+    # The values inside holes were used for boundary conditions, but are not part of the solution domain.
+    u_plot = np.copy(u_solution_grid)
+    u_plot[is_inside_hole] = np.nan
+    return u_solution_grid, u_plot
+
+def plot_solution(X, Y, u_plot, circles, filename='poisson_boltzmann_solution.png'):
+    # Plots the contour of u and marks the circles.
+    plt.figure(figsize=(10, 8))
+    contour = plt.contourf(X, Y, u_plot, levels=50, cmap='jet', extend='both')
+    plt.colorbar(contour, label='u(x,y)')
+    plt.title('Contour Plot of u(x,y) for Poisson-Boltzmann Equation')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.gca().set_aspect('equal', adjustable='box')
+
+    # Mark the circles
+    for cx, cy, r in circles:
+        # Draw the circle boundary
+        circle_boundary = patches.Circle((cx, cy), r, edgecolor='black', facecolor='none', linestyle='--', linewidth=1.5)
+        plt.gca().add_patch(circle_boundary)
+        # Fill the circle region with a semi-transparent color to visually represent the hole
+        filled_circle = patches.Circle((cx, cy), r, color='lightgray', alpha=0.5)
+        plt.gca().add_patch(filled_circle)
+
+    plt.xlim([-1, 1])
+    plt.ylim([-1, 1])
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    plt.close() # Close the plot to free memory
+
+# --- Main Execution Block ---
+
+if __name__ == "__main__":
+    # Print problem setup information
+    print("--- Problem Setup ---")
+    print(f"Domain: [-1, 1]^2")
+    print(f"Grid resolution: {nx}x{ny} points")
+    print(f"Grid spacing (h): {h:.4f}")
+    print(f"k value: {k_val}")
+    print(f"A value: {A_val}")
+    print(f"mu1: {mu1}, mu2: {mu2}")
+    print(f"Outer boundary condition (u): 0.2")
+    print(f"Circle boundary condition (u): 1.0")
+
+    # 1. Create masks for different regions
+    is_inside_hole, is_outer_boundary, is_valid_domain_point, is_unknown_point = create_masks(X, Y, circles, nx, ny)
+    
+    # 2. Create mapping from 2D to 1D indices for unknown points
+    row_map, col_map, num_unknowns = map_indices(is_unknown_point, ny, nx)
+    print(f"Number of unknown points (interior to domain, not on outer boundary): {num_unknowns}")
+
+    # 3. Initialize the solution grid with boundary conditions
+    # Points on outer boundary get 0.2
+    # Points inside holes get 1.0 (these act as Dirichlet boundaries for their neighbors)
+    # Unknown points (where we solve) are initially NaN, will be filled after solving
+    u_initial_grid = np.full((ny, nx), np.nan)
+    u_initial_grid[is_outer_boundary] = 0.2
+    u_initial_grid[is_inside_hole] = 1.0
+
+    # 4. Calculate the source term f(x,y) on the meshgrid
+    f_grid = calculate_f(X, Y, A_val, mu1, mu2)
+
+    # --- Solving Process ---
+    print("\n--- Solving Process ---")
+    # 5. Assemble the linear system A * u_vec = b_vec using sparse matrix
+    A_matrix, b_vector = assemble_system(nx, ny, h, k_val, f_grid, u_initial_grid, is_unknown_point, row_map, num_unknowns)
+    print(f"Assembled sparse matrix A with shape: {A_matrix.shape} and {A_matrix.nnz} non-zero elements.")
+
+    # 6. Solve the linear system
+    u_flat_solution = solve_system(A_matrix, b_vector)
+
+    # 7. Post-process the solution
+    u_solution_grid, u_plot = post_process_solution(u_flat_solution, u_initial_grid, col_map, is_inside_hole)
+
+    # --- Solution Statistics ---
+    print("\n--- Solution Statistics ---")
+    print(f"Minimum u value (excluding holes): {np.nanmin(u_plot):.4f}")
+    print(f"Maximum u value (excluding holes): {np.nanmax(u_plot):.4f}")
+    print(f"Mean u value (excluding holes): {np.nanmean(u_plot):.4f}")
+
+    # --- Plotting Information ---
+    print("\n--- Plotting Information ---")
+    plot_filename = 'poisson_boltzmann_solution_refined.png'
+    plot_solution(X, Y, u_plot, circles, plot_filename)
+    print(f"Contour plot saved as '{plot_filename}'")
+    print("Circles are marked on the plot with black dashed lines and light gray fill.")
+    print("Colormap used: 'jet'")
+```
+****************************************

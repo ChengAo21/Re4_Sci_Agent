@@ -1,0 +1,380 @@
+
+****************************************
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib.pyplot as plt
+
+# ---------------------------
+# Technical Explanation:
+# ---------------------------
+# This code solves the 2D unsteady incompressible Navier-Stokes equations
+# using the classical Projection Method (Chorin's method) on a uniform grid.
+#
+# Algorithm steps per time step:
+# 1. Compute intermediate velocity (u*, v*) ignoring pressure gradient,
+#    using explicit Euler for convective and forcing terms,
+#    and implicit Euler for viscous diffusion (semi-implicit scheme).
+# 2. Solve the pressure Poisson equation derived from the incompressibility constraint
+#    using GMRES with an absolute tolerance (atol) for convergence.
+# 3. Correct the intermediate velocity with the pressure gradient to enforce divergence-free velocity.
+#
+# Spatial derivatives are approximated by second-order central finite differences.
+# Boundary conditions:
+# - No-slip (u=v=0) on top and bottom walls.
+# - Time-dependent inlet velocity on left boundary.
+# - Zero-gradient (Neumann) velocity and zero pressure at outlet (right boundary).
+#
+# The forcing term acts only on the vertical velocity component.
+#
+# Results (velocity components u, v and pressure p) are saved as contour plots at final time t=0.5.
+# The jet colormap is used for visualization.
+#
+# The code prints GMRES solver convergence info and divergence norm at intervals to monitor solution quality.
+#
+# Optimizations and fixes incorporated:
+# - Semi-implicit time stepping: implicit Euler for diffusion terms to improve stability.
+# - Corrected contour plotting by removing transpose to fix shape mismatch.
+# - Consistent Fortran-order flattening and reshaping for pressure vectorization.
+# - Clear and detailed print statements for solver diagnostics.
+# - Sparse matrix assembly optimized with lil_matrix for boundary modifications before conversion to CSR.
+# - Enforced boundary conditions carefully after each step.
+# - Used atol in GMRES to avoid TypeError.
+# ---------------------------
+
+# ---------------------------
+# Parameters and domain setup
+# ---------------------------
+Re = 100.0
+Lx, Ly = 2.0, 1.0
+T_final = 0.5
+
+nx, ny = 81, 41  # grid points in x and y (including boundaries)
+dx = Lx / (nx - 1)
+dy = Ly / (ny - 1)
+
+x = np.linspace(0, Lx, nx)
+y = np.linspace(0, Ly, ny)
+X, Y = np.meshgrid(x, y, indexing='ij')  # shape (nx, ny)
+
+dt = 0.001  # time step size
+nt = int(T_final / dt)
+
+# ---------------------------
+# Initialize fields
+# ---------------------------
+u = np.zeros((nx, ny))  # velocity x-component
+v = np.zeros((nx, ny))  # velocity y-component
+p = np.zeros((nx, ny))  # pressure
+
+# ---------------------------
+# Forcing term function
+# ---------------------------
+def forcing(t):
+    # f = (0, -sin(pi x) sin(pi y) sin(pi t))
+    fy = -np.sin(np.pi * X) * np.sin(np.pi * Y) * np.sin(np.pi * t)
+    fx = np.zeros_like(fy)
+    return fx, fy
+
+# ---------------------------
+# Inlet velocity function
+# ---------------------------
+def inlet_velocity(y_vals, t):
+    # u(0,y,t) = sin(pi y) * (sin(pi t) + sin(3 pi t) + sin(5 pi t))
+    return np.sin(np.pi * y_vals) * (np.sin(np.pi * t) + np.sin(3 * np.pi * t) + np.sin(5 * np.pi * t))
+
+# ---------------------------
+# Apply velocity boundary conditions
+# ---------------------------
+def apply_velocity_bcs(u_field, v_field, t):
+    # No-slip top and bottom walls (y=0 and y=Ly)
+    u_field[:, 0] = 0.0
+    v_field[:, 0] = 0.0
+    u_field[:, -1] = 0.0
+    v_field[:, -1] = 0.0
+
+    # Inlet (x=0)
+    u_field[0, :] = inlet_velocity(y, t)
+    v_field[0, :] = 0.0
+
+    # Outlet (x=Lx) Neumann for velocity: du/dx = dv/dx = 0
+    # Approximate by copying values from interior (second last column)
+    u_field[-1, :] = u_field[-2, :]
+    v_field[-1, :] = v_field[-2, :]
+
+# ---------------------------
+# Apply pressure boundary conditions
+# ---------------------------
+def apply_pressure_bcs(p_field):
+    # Pressure Dirichlet at outlet (x=Lx): p=0
+    p_field[-1, :] = 0.0
+
+    # Neumann BCs for pressure at other boundaries (dp/dn=0)
+    # Approximate by copying adjacent interior values
+    p_field[0, :] = p_field[1, :]      # inlet
+    p_field[:, 0] = p_field[:, 1]      # bottom wall
+    p_field[:, -1] = p_field[:, -2]    # top wall
+
+# ---------------------------
+# Finite difference operators
+# ---------------------------
+def laplacian(field):
+    lap = np.zeros_like(field)
+    lap[1:-1,1:-1] = (
+        (field[2:,1:-1] - 2*field[1:-1,1:-1] + field[0:-2,1:-1]) / dx**2 +
+        (field[1:-1,2:] - 2*field[1:-1,1:-1] + field[1:-1,0:-2]) / dy**2
+    )
+    return lap
+
+def ddx(field):
+    d = np.zeros_like(field)
+    d[1:-1,:] = (field[2:,:] - field[0:-2,:]) / (2*dx)
+    d[0,:] = (field[1,:] - field[0,:]) / dx
+    d[-1,:] = (field[-1,:] - field[-2,:]) / dx
+    return d
+
+def ddy(field):
+    d = np.zeros_like(field)
+    d[:,1:-1] = (field[:,2:] - field[:,0:-2]) / (2*dy)
+    d[:,0] = (field[:,1] - field[:,0]) / dy
+    d[:,-1] = (field[:,-1] - field[:,-2]) / dy
+    return d
+
+def divergence(u_field, v_field):
+    return ddx(u_field) + ddy(v_field)
+
+def gradient(field):
+    return ddx(field), ddy(field)
+
+# ---------------------------
+# Pressure Poisson matrix assembly
+# ---------------------------
+def build_pressure_poisson_matrix(nx, ny, dx, dy):
+    N = nx * ny
+    A = sp.lil_matrix((N, N))
+
+    dx2 = dx*dx
+    dy2 = dy*dy
+    main_diag_val = -2.0/dx2 - 2.0/dy2
+
+    for j in range(ny):
+        for i in range(nx):
+            idx = i + j*nx
+            # Outlet boundary (Dirichlet p=0)
+            if i == nx - 1:
+                A[idx, idx] = 1.0
+                continue
+
+            A[idx, idx] = main_diag_val
+
+            # Left neighbor
+            if i > 0:
+                A[idx, idx - 1] = 1.0 / dx2
+            else:
+                # Neumann BC at inlet: dp/dx=0 => approximate by copying interior value
+                A[idx, idx] += 1.0 / dx2  # effectively zero flux
+
+            # Right neighbor
+            if i < nx - 1:
+                A[idx, idx + 1] = 1.0 / dx2
+
+            # Bottom neighbor
+            if j > 0:
+                A[idx, idx - nx] = 1.0 / dy2
+            else:
+                # Neumann BC at bottom wall: dp/dy=0
+                A[idx, idx] += 1.0 / dy2
+
+            # Top neighbor
+            if j < ny - 1:
+                A[idx, idx + nx] = 1.0 / dy2
+            else:
+                # Neumann BC at top wall: dp/dy=0
+                A[idx, idx] += 1.0 / dy2
+
+    return A.tocsr()
+
+# ---------------------------
+# Flatten and reshape helpers
+# ---------------------------
+def flatten(field):
+    # Flatten in Fortran order (column-major) for consistency with indexing
+    return field.ravel(order='F')
+
+def reshape_field(vec):
+    return vec.reshape((nx, ny), order='F')
+
+# ---------------------------
+# Semi-implicit diffusion solver for velocity
+# Solve (I - dt/Re * Laplacian) u_new = RHS
+# ---------------------------
+def build_diffusion_matrix(nx, ny, dx, dy, dt, Re):
+    N = nx * ny
+    A = sp.lil_matrix((N, N))
+
+    dx2 = dx*dx
+    dy2 = dy*dy
+    coeff = dt / Re
+
+    main_diag_val = 1.0 + 2.0*coeff*(1.0/dx2 + 1.0/dy2)
+
+    for j in range(ny):
+        for i in range(nx):
+            idx = i + j*nx
+
+            # Boundary nodes: enforce Dirichlet u=0 or Neumann as needed
+            # For velocity, we will apply BCs explicitly after solve,
+            # so here treat all nodes as interior for matrix assembly.
+
+            A[idx, idx] = main_diag_val
+
+            # Left neighbor
+            if i > 0:
+                A[idx, idx - 1] = -coeff / dx2
+            else:
+                # For boundary, no neighbor, treat as Dirichlet zero velocity
+                # This is handled by BC application after solve.
+
+                # Alternatively, could modify matrix or RHS here if needed.
+                pass
+
+            # Right neighbor
+            if i < nx - 1:
+                A[idx, idx + 1] = -coeff / dx2
+
+            # Bottom neighbor
+            if j > 0:
+                A[idx, idx - nx] = -coeff / dy2
+            else:
+                pass
+
+            # Top neighbor
+            if j < ny - 1:
+                A[idx, idx + nx] = -coeff / dy2
+            else:
+                pass
+
+    return A.tocsr()
+
+# ---------------------------
+# Main time-stepping loop
+# ---------------------------
+
+# Pre-build matrices
+A_p = build_pressure_poisson_matrix(nx, ny, dx, dy)
+A_diff = build_diffusion_matrix(nx, ny, dx, dy, dt, Re)
+
+# GMRES tolerance
+gmres_tol = 1e-6
+
+print("Starting time-stepping with semi-implicit diffusion...")
+
+for n in range(1, nt+1):
+    t = n * dt
+
+    # Apply velocity BCs at current time
+    apply_velocity_bcs(u, v, t)
+
+    # Compute forcing term at current time
+    fx, fy = forcing(t)
+
+    # Compute nonlinear convective terms
+    u_x = ddx(u)
+    u_y = ddy(u)
+    v_x = ddx(v)
+    v_y = ddy(v)
+
+    conv_u = u * u_x + v * u_y
+    conv_v = u * v_x + v * v_y
+
+    # Explicit RHS for velocity diffusion step
+    rhs_u = u + dt * (-conv_u + fx)
+    rhs_v = v + dt * (-conv_v + fy)
+
+    # Solve implicit diffusion step for u and v:
+    # (I - dt/Re * Laplacian) u_star = rhs_u
+    # (I - dt/Re * Laplacian) v_star = rhs_v
+
+    # Flatten rhs vectors
+    rhs_u_flat = flatten(rhs_u)
+    rhs_v_flat = flatten(rhs_v)
+
+    # Solve linear systems with GMRES (no preconditioner)
+    u_star_flat, info_u = spla.gmres(A_diff, rhs_u_flat, atol=gmres_tol, restart=50)
+    v_star_flat, info_v = spla.gmres(A_diff, rhs_v_flat, atol=gmres_tol, restart=50)
+
+    if info_u != 0:
+        print(f"Time step {n}/{nt}, t={t:.4f}: GMRES diffusion solve for u did NOT converge, info={info_u}")
+    if info_v != 0:
+        print(f"Time step {n}/{nt}, t={t:.4f}: GMRES diffusion solve for v did NOT converge, info={info_v}")
+
+    u_star = reshape_field(u_star_flat)
+    v_star = reshape_field(v_star_flat)
+
+    # Apply velocity BCs to intermediate velocity
+    apply_velocity_bcs(u_star, v_star, t)
+
+    # Compute RHS for pressure Poisson eq: div(u_star) / dt
+    div_u_star = divergence(u_star, v_star)
+    rhs_p = flatten(div_u_star) / dt
+
+    # Enforce pressure BCs on RHS: p=0 at outlet nodes => rhs=0 at those nodes
+    for j in range(ny):
+        idx = (nx - 1) + j * nx
+        rhs_p[idx] = 0.0
+
+    # Solve pressure Poisson equation A_p p = rhs_p using GMRES
+    p_flat = flatten(p)
+    p_new_flat, info_p = spla.gmres(A_p, rhs_p, x0=p_flat, atol=gmres_tol, restart=50)
+
+    if info_p == 0:
+        print(f"Time step {n}/{nt}, t={t:.4f}: GMRES pressure Poisson converged successfully.")
+    else:
+        print(f"Time step {n}/{nt}, t={t:.4f}: GMRES pressure Poisson failed to converge, info={info_p}")
+
+    p = reshape_field(p_new_flat)
+
+    # Apply pressure BCs explicitly
+    apply_pressure_bcs(p)
+
+    # Compute pressure gradients
+    dpdx, dpdy = gradient(p)
+
+    # Correct velocity to enforce incompressibility
+    u = u_star - dt * dpdx
+    v = v_star - dt * dpdy
+
+    # Apply velocity BCs after correction
+    apply_velocity_bcs(u, v, t)
+
+    # Compute divergence norm to monitor incompressibility
+    div_norm = np.linalg.norm(divergence(u, v), ord=2)
+    if n % 50 == 0 or n == nt:
+        print(f"Time step {n}/{nt}, t={t:.4f}: Divergence L2 norm = {div_norm:.3e}")
+
+print("Time-stepping completed.")
+
+# ---------------------------
+# Plotting results at t=0.5
+# ---------------------------
+def plot_contour(field, title, filename):
+    plt.figure(figsize=(8,4))
+    # No transpose here to fix shape mismatch error
+    cp = plt.contourf(X, Y, field, 50, cmap='jet')
+    plt.colorbar(cp)
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(filename)
+    plt.close()
+
+plot_contour(u, 'Velocity u at t=0.5', 'velocity_u_t0.5.png')
+plot_contour(v, 'Velocity v at t=0.5', 'velocity_v_t0.5.png')
+plot_contour(p, 'Pressure p at t=0.5', 'pressure_p_t0.5.png')
+
+print("Contour plots saved: velocity_u_t0.5.png, velocity_v_t0.5.png, pressure_p_t0.5.png")
+```
+
+****************************************

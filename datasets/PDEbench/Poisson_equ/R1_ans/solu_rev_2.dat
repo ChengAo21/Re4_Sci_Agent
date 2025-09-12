@@ -1,0 +1,185 @@
+
+****************************************
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib.pyplot as plt
+
+# Domain parameters
+N = 200  # Increased resolution for better boundary approximation
+r = 0.1  # Hole radius
+circles = [(0.3, 0.3), (-0.3, 0.3), (0.3, -0.3), (-0.3, -0.3)]
+h = 1.0 / (N - 1)  # Grid spacing for [-0.5, 0.5]^2 domain
+
+# Create computational grid
+x = np.linspace(-0.5, 0.5, N)
+y = np.linspace(-0.5, 0.5, N)
+X, Y = np.meshgrid(x, y, indexing='ij')
+
+# Initialize masks with improved boundary approximation
+hole_mask = np.zeros((N, N), dtype=bool)         # Full hole interiors
+boundary_mask = np.zeros((N, N), dtype=bool)      # Boundary transition zone
+outer_mask = np.zeros((N, N), dtype=bool)         # Outer rectangle boundary
+
+# Precise boundary identification using 0.5h threshold
+for cx, cy in circles:
+    dist = np.sqrt((X - cx)**2 + (Y - cy)**2)
+    hole_mask |= dist <= (r - 0.5*h)      # Strict interior points
+    boundary_mask |= (dist > (r - 0.5*h)) & (dist <= (r + 0.5*h))  # Boundary band
+
+# Set outer boundary (rectangle edges)
+outer_mask[0, :] = outer_mask[-1, :] = outer_mask[:, 0] = outer_mask[:, -1] = True
+
+# Apply boundary conditions
+u = np.zeros((N, N))
+u[outer_mask] = 1.0        # Outer boundary = 1
+u[boundary_mask | hole_mask] = 0.0  # Hole boundaries and interiors = 0
+
+# Create active point mask (points to solve for)
+fixed_mask = hole_mask | boundary_mask | outer_mask
+active_mask = ~fixed_mask
+n_active = np.sum(active_mask)
+
+# Map active points to 1D indices
+idx = np.full((N, N), -1, dtype=int)
+active_points = np.argwhere(active_mask)
+for count, (i, j) in enumerate(active_points):
+    idx[i, j] = count
+
+# Build sparse matrix in COO format (memory-efficient assembly)
+row_indices = []
+col_indices = []
+data = []
+b = np.zeros(n_active)  # Right-hand side vector
+h2 = h * h  # Precompute h² for efficiency
+
+# Assemble linear system using 5-point stencil
+for count, (i, j) in enumerate(active_points):
+    # Diagonal element (Laplace operator coefficient)
+    row_indices.append(count)
+    col_indices.append(count)
+    data.append(4.0 / h2)
+    
+    # Process neighbors: left, right, top, bottom
+    for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        ni, nj = i + di, j + dj
+        if 0 <= ni < N and 0 <= nj < N:
+            neighbor_idx = idx[ni, nj]
+            if neighbor_idx >= 0:  # Active neighbor
+                row_indices.append(count)
+                col_indices.append(neighbor_idx)
+                data.append(-1.0 / h2)
+            else:  # Fixed boundary neighbor
+                b[count] += u[ni, nj] / h2  # Boundary contribution to RHS
+
+# Create sparse CSR matrix for efficient solving
+A = sp.coo_matrix((data, (row_indices, col_indices)), shape=(n_active, n_active))
+A_csr = A.tocsr()
+
+# Create Jacobi preconditioner (diagonal scaling)
+M_diag = 1.0 / A_csr.diagonal()
+M = sp.diags(M_diag, format='csr')
+
+# Solve using preconditioned conjugate gradient with iteration tracking
+iter_count = 0
+def callback(xk):
+    global iter_count
+    iter_count += 1
+
+solution, info = spla.cg(A_csr, b, M=M, atol=1e-10, rtol=1e-8, maxiter=10000, callback=callback)
+
+# Update solution array and compute residual
+u[active_mask] = solution
+residual = A_csr @ solution - b
+residual_norm = np.linalg.norm(residual)
+b_norm = np.linalg.norm(b)
+
+# Enhanced solver diagnostics
+print(f"Grid size: {N}x{N} = {N*N} points")
+print(f"Active points: {n_active} ({100*n_active/(N*N):.2f}% of domain)")
+print(f"Boundary points: {np.sum(fixed_mask)}")
+print(f"CG iterations: {iter_count}, Convergence info: {info} (0=success)")
+print(f"Absolute residual norm: {residual_norm:.4e}")
+print(f"Relative residual norm: {residual_norm/b_norm:.4e}")
+print(f"Solution range: min={np.min(u):.6f}, max={np.max(u):.6f}")
+
+# Prepare plot data (set holes to NaN for visualization)
+u_plot = np.where(hole_mask, np.nan, u)
+
+# Create contour plot with marked circles and grid
+plt.figure(figsize=(10, 8))
+contour = plt.contourf(X, Y, u_plot, levels=50, cmap='jet')
+plt.colorbar(contour, label='Solution value')
+plt.title('Solution to Laplace Equation with Circular Holes')
+plt.grid(alpha=0.3)
+
+# Mark hole boundaries
+for cx, cy in circles:
+    circle = plt.Circle((cx, cy), r, color='black', fill=False, linewidth=1.5)
+    plt.gca().add_patch(circle)
+
+plt.axis('equal')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.tight_layout()
+plt.savefig('poisson_2d_solution_refined.png')
+
+# Centerline profile for validation
+plt.figure()
+y_center = N // 2
+plt.plot(x, u[:, y_center], 'b-', linewidth=2)
+plt.title('Solution along x-axis (y=0)')
+plt.xlabel('x')
+plt.ylabel('u(x,0)')
+plt.grid(True)
+plt.savefig('centerline_profile.png')
+```
+
+### Key Improvements and Technical Explanation:
+
+1. **Boundary Approximation Refinement**:
+   - Changed boundary band threshold from 0.75h to 0.5h for more precise geometric representation
+   - Improved mask definitions: `hole_mask` (strict interior), `boundary_mask` (transition band), `outer_mask` (rectangle edges)
+   - Ensured boundary points are properly excluded from the solve while maintaining BC enforcement
+
+2. **Residual Analysis Enhancement**:
+   - Added calculation of relative residual norm (`||r||/||b||`) for better convergence assessment
+   - Reduced absolute tolerance to 1e-10 and added relative tolerance 1e-8 for stricter convergence
+   - Implemented iteration tracking via callback function to monitor solver performance
+
+3. **Matrix Assembly Optimization**:
+   - Maintained COO format for efficient construction of sparse matrix
+   - Precomputed h² to avoid repeated calculations in coefficient assignments
+   - Used CSR format for final matrix storage to optimize solver performance
+
+4. **Diagnostic Output Expansion**:
+   - Added iteration count reporting
+   - Included both absolute and relative residual norms
+   - Enhanced solution range reporting with higher precision
+   - Maintained active point percentage for domain coverage assessment
+
+5. **Visualization Improvements**:
+   - Added grid lines to contour plot for better spatial reference
+   - Increased resolution to N=200 for smoother contours
+   - Maintained hole boundary markings and NaN masking for clear visualization
+
+### Algorithm Selection Rationale:
+The finite difference method with Cartesian grid remains appropriate for this problem due to:
+- Rectangular base domain geometry
+- Straightforward boundary conditions
+- Computational efficiency with sparse matrix methods
+- Compatibility with requested libraries (NumPy/SciPy)
+
+The conjugate gradient method with Jacobi preconditioning is suitable because:
+- The discrete Laplace operator is symmetric positive definite
+- Jacobi preconditioning provides adequate diagonal scaling
+- CG efficiently handles large sparse systems with O(N) complexity per iteration
+
+### Numerical Considerations:
+1. **Boundary Treatment**: The 0.5h boundary band provides a first-order accurate representation of curved boundaries on a Cartesian grid. For higher-order accuracy, ghost cell methods or coordinate transformations would be needed.
+
+2. **Convergence Criteria**: The dual tolerance (absolute + relative) ensures robust convergence detection. The relative residual norm is particularly important since ||b|| scales as O(1/h²).
+
+3. **Solution Validation**: The centerline profile plot provides a quick sanity check for solution symmetry and boundary condition satisfaction. The reported solution range (0-1) confirms proper BC enforcement.
+****************************************

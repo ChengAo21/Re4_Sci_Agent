@@ -1,0 +1,302 @@
+
+****************************************
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib.pyplot as plt
+from scipy.ndimage import binary_dilation
+
+# ---------------------------
+# Technical explanation:
+# We solve the 2D Laplace equation -Δu = 0 on a square domain [-L, L]^2 with four circular holes removed.
+# Dirichlet boundary conditions:
+#   u = 1 on the outer square boundary,
+#   u = 0 on the boundaries of the four circular holes.
+#
+# The domain is discretized on a uniform Cartesian grid.
+# Points inside holes are excluded from the computational domain.
+# Hole boundaries are identified by morphological dilation to find points adjacent to holes.
+# A standard 5-point finite difference stencil discretizes the Laplacian.
+# The linear system is assembled as a sparse matrix and solved with a direct sparse solver.
+# The solution is reconstructed on the full grid and visualized with contour plots.
+# Circles representing holes are overlaid on the plot.
+#
+# Optimizations and improvements incorporated:
+# - Added detailed docstrings and comments for clarity.
+# - Included contour lines on top of filled contours for better visualization.
+# - Added solver and grid info in plot title for traceability.
+# - Printed detailed solution statistics and residual diagnostics.
+# - Used vectorized operations where possible.
+# - Structured code modularly with clear separation of concerns.
+# ---------------------------
+
+def create_domain_and_masks(L: float, r: float, centers: np.ndarray, N: int):
+    """
+    Create computational domain grid and masks for holes, boundaries, and interior points.
+
+    Parameters:
+    L       : half-length of square domain [-L, L]^2
+    r       : radius of circular holes
+    centers : array of shape (4,2) with circle centers
+    N       : number of grid points per dimension
+
+    Returns:
+    X, Y                : 2D meshgrid arrays of coordinates
+    h                   : grid spacing
+    hole_mask           : boolean mask of points inside holes
+    outer_boundary_mask : boolean mask of points on outer square boundary
+    hole_boundary_mask  : boolean mask of points adjacent to holes (hole boundaries)
+    interior_mask       : boolean mask of interior unknown points (not boundary or holes)
+    """
+    x = np.linspace(-L, L, N)
+    y = np.linspace(-L, L, N)
+    h = x[1] - x[0]
+    X, Y = np.meshgrid(x, y, indexing='ij')
+
+    # Compute squared distances to each hole center, shape (N, N, 4)
+    dist_sq = (X[..., None] - centers[:, 0])**2 + (Y[..., None] - centers[:, 1])**2
+    # Mask points inside any hole
+    hole_mask = np.any(dist_sq <= r**2, axis=2)
+
+    # Outer boundary mask: points on edges of the square
+    outer_boundary_mask = np.zeros_like(X, dtype=bool)
+    outer_boundary_mask[0, :] = True
+    outer_boundary_mask[-1, :] = True
+    outer_boundary_mask[:, 0] = True
+    outer_boundary_mask[:, -1] = True
+
+    # Hole boundary mask: points outside holes but adjacent to hole points
+    # Use binary dilation with cross-shaped structuring element to find neighbors of hole points
+    structure = np.array([[0,1,0],
+                          [1,1,1],
+                          [0,1,0]], dtype=bool)
+    hole_dilated = binary_dilation(hole_mask, structure=structure)
+    hole_boundary_mask = hole_dilated & (~hole_mask)
+
+    # Interior points: not in holes, not on outer boundary, not on hole boundary
+    interior_mask = (~hole_mask) & (~outer_boundary_mask) & (~hole_boundary_mask)
+
+    return X, Y, h, hole_mask, outer_boundary_mask, hole_boundary_mask, interior_mask
+
+
+def assemble_system(interior_mask: np.ndarray, hole_boundary_mask: np.ndarray,
+                    outer_boundary_mask: np.ndarray, N: int):
+    """
+    Assemble the sparse linear system A u = b for the Laplace equation discretized by 5-point stencil.
+
+    Parameters:
+    interior_mask       : boolean mask of interior unknown points
+    hole_boundary_mask  : boolean mask of hole boundary points (Dirichlet u=0)
+    outer_boundary_mask : boolean mask of outer boundary points (Dirichlet u=1)
+    N                   : grid size per dimension
+
+    Returns:
+    A           : sparse CSR matrix of size (num_unknowns, num_unknowns)
+    b           : right-hand side vector
+    index_map   : 2D array mapping grid points to unknown indices (-1 if not unknown)
+    num_unknowns: number of unknowns (interior points)
+    """
+    num_unknowns = np.sum(interior_mask)
+    index_map = -np.ones((N, N), dtype=int)
+    index_map[interior_mask] = np.arange(num_unknowns)
+
+    data = []
+    rows = []
+    cols = []
+    b = np.zeros(num_unknowns)
+
+    def dirichlet_value(i, j):
+        # Return Dirichlet boundary value at (i,j) if on boundary, else None
+        if outer_boundary_mask[i, j]:
+            return 1.0
+        elif hole_boundary_mask[i, j]:
+            return 0.0
+        else:
+            return None
+
+    # Assemble matrix and RHS
+    # Loop only over interior points (unknowns)
+    for i, j in zip(*np.where(interior_mask)):
+        row_idx = index_map[i, j]
+        diag = 0
+        neighbors = [(i+1, j), (i-1, j), (i, j+1), (i, j-1)]
+        for ni, nj in neighbors:
+            if interior_mask[ni, nj]:
+                # Neighbor is unknown: off-diagonal -1
+                rows.append(row_idx)
+                cols.append(index_map[ni, nj])
+                data.append(-1.0)
+                diag += 1
+            else:
+                # Neighbor is Dirichlet boundary or inside hole (treated as zero)
+                val = dirichlet_value(ni, nj)
+                if val is None:
+                    val = 0.0
+                b[row_idx] += val
+                diag += 1
+        # Diagonal entry
+        rows.append(row_idx)
+        cols.append(row_idx)
+        data.append(diag)
+
+    A = sp.csr_matrix((data, (rows, cols)), shape=(num_unknowns, num_unknowns))
+    return A, b, index_map, num_unknowns
+
+
+def solve_laplace(A: sp.csr_matrix, b: np.ndarray):
+    """
+    Solve the linear system A u = b using a direct sparse solver.
+
+    Parameters:
+    A : sparse matrix
+    b : RHS vector
+
+    Returns:
+    u_vec    : solution vector
+    res_norm : residual norm ||A u - b||
+    """
+    print("Solving linear system...")
+    u_vec = spla.spsolve(A, b)
+    print("Linear system solved.")
+    residual = A.dot(u_vec) - b
+    res_norm = np.linalg.norm(residual)
+    print(f"Residual norm ||A u - b|| = {res_norm:.3e}")
+    return u_vec, res_norm
+
+
+def reconstruct_solution(u_vec: np.ndarray, index_map: np.ndarray,
+                         outer_boundary_mask: np.ndarray, hole_boundary_mask: np.ndarray,
+                         hole_mask: np.ndarray, N: int):
+    """
+    Reconstruct full solution grid including boundary and hole values.
+
+    Parameters:
+    u_vec              : solution vector at interior points
+    index_map          : mapping from grid points to indices in u_vec
+    outer_boundary_mask: mask of outer boundary points (u=1)
+    hole_boundary_mask : mask of hole boundary points (u=0)
+    hole_mask          : mask of points inside holes (NaN for plotting)
+    N                  : grid size per dimension
+
+    Returns:
+    U : 2D array of solution values on full grid (NaN inside holes)
+    """
+    U = np.zeros((N, N), dtype=float)
+    U[outer_boundary_mask] = 1.0
+    U[hole_boundary_mask] = 0.0
+    U[hole_mask] = np.nan  # Mark holes as NaN for plotting
+
+    # Assign interior solution values
+    interior_indices = np.where(index_map >= 0)
+    U[interior_indices] = u_vec[index_map[interior_indices]]
+    return U
+
+
+def plot_solution(X: np.ndarray, Y: np.ndarray, U: np.ndarray,
+                  centers: np.ndarray, r: float, L: float, N: int, res_norm: float):
+    """
+    Plot the solution contour with holes marked.
+
+    Parameters:
+    X, Y    : meshgrid coordinate arrays
+    U       : solution array with NaNs inside holes
+    centers : circle centers
+    r       : radius of holes
+    L       : half-length of domain
+    N       : grid size per dimension
+    res_norm: residual norm for display
+    """
+    fig, ax = plt.subplots(figsize=(7, 7))
+    # Filled contour plot with 50 levels and jet colormap
+    contour_filled = ax.contourf(X, Y, U, levels=50, cmap='jet', extend='both')
+    # Overlay contour lines for clarity
+    contour_lines = ax.contour(X, Y, U, levels=10, colors='k', linewidths=0.5, alpha=0.7)
+
+    # Overlay circles representing holes
+    theta = np.linspace(0, 2 * np.pi, 200)
+    for cx, cy in centers:
+        x_circ = cx + r * np.cos(theta)
+        y_circ = cy + r * np.sin(theta)
+        ax.plot(x_circ, y_circ, 'k-', linewidth=1.5)
+
+    ax.set_aspect('equal')
+    ax.set_xlim(-L, L)
+    ax.set_ylim(-L, L)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_title(f'Solution u of Laplace equation with 4 circular holes\n'
+                 f'Grid: {N}x{N}, Residual norm: {res_norm:.2e}')
+    cbar = fig.colorbar(contour_filled, ax=ax)
+    cbar.set_label('u')
+    plt.tight_layout()
+    plt.savefig('laplace_2d_circles_solution.png')
+    # plt.show() omitted as per instructions
+
+
+def print_solution_statistics(U: np.ndarray):
+    """
+    Print statistics of the solution excluding holes.
+
+    Parameters:
+    U : solution array with NaNs inside holes
+    """
+    print("Solution u statistics (excluding holes):")
+    print(f"  min u = {np.nanmin(U):.4f}")
+    print(f"  max u = {np.nanmax(U):.4f}")
+    print(f"  mean u = {np.nanmean(U):.4f}")
+    # Additional smoothness check: max absolute difference between neighbors
+    # Compute finite differences ignoring NaNs
+    diff_x = np.abs(np.diff(U, axis=0))
+    diff_y = np.abs(np.diff(U, axis=1))
+    max_diff_x = np.nanmax(diff_x)
+    max_diff_y = np.nanmax(diff_y)
+    print(f"  max |u[i+1,j] - u[i,j]| = {max_diff_x:.4f}")
+    print(f"  max |u[i,j+1] - u[i,j]| = {max_diff_y:.4f}")
+
+
+def main():
+    # Domain parameters
+    L = 0.5  # half-length of square domain [-L, L]^2
+    r = 0.1  # radius of holes
+    centers = np.array([[0.3, 0.3],
+                        [-0.3, 0.3],
+                        [0.3, -0.3],
+                        [-0.3, -0.3]])
+    # Grid parameters
+    N = 201  # number of points per dimension (odd for symmetry)
+
+    print(f"Grid size: {N}x{N} = {N*N} points")
+
+    # Create domain and masks
+    X, Y, h, hole_mask, outer_boundary_mask, hole_boundary_mask, interior_mask = create_domain_and_masks(L, r, centers, N)
+
+    print(f"Number of points inside holes: {np.sum(hole_mask)}")
+    print(f"Number of outer boundary points: {np.sum(outer_boundary_mask)}")
+    print(f"Number of hole boundary points: {np.sum(hole_boundary_mask)}")
+    print(f"Number of unknown interior points: {np.sum(interior_mask)}")
+
+    # Assemble linear system
+    A, b, index_map, num_unknowns = assemble_system(interior_mask, hole_boundary_mask, outer_boundary_mask, N)
+
+    print("Sparse matrix A assembled.")
+    print(f"Matrix shape: {A.shape}")
+    print(f"Number of nonzeros in A: {A.nnz}")
+
+    # Solve system
+    u_vec, res_norm = solve_laplace(A, b)
+
+    # Reconstruct full solution grid
+    U = reconstruct_solution(u_vec, index_map, outer_boundary_mask, hole_boundary_mask, hole_mask, N)
+
+    # Print solution statistics and diagnostics
+    print_solution_statistics(U)
+
+    # Plot solution
+    plot_solution(X, Y, U, centers, r, L, N, res_norm)
+
+
+if __name__ == "__main__":
+    main()
+```
+****************************************

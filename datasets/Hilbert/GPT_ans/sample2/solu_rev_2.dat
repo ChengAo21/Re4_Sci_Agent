@@ -1,0 +1,377 @@
+
+****************************************
+```python
+import numpy as np
+import scipy.linalg
+import matplotlib.pyplot as plt
+
+# Technical explanation:
+# The Hilbert matrix H_n is a classic example of a symmetric positive definite (SPD) but extremely ill-conditioned matrix.
+# We solve the linear system H_n x = b where the exact solution x = (1,1,...,1)^T is known.
+# The right-hand side vector b is computed as b = H_n @ x_exact.
+#
+# We implement and compare multiple solution methods:
+# 1) LU factorization with complete pivoting (row and column) from scratch to improve numerical stability over scaled partial pivoting.
+# 2) Cholesky factorization with adaptive diagonal regularization proportional to the matrix norm to maintain positive definiteness.
+# 3) SVD-based solver using adaptive thresholding for singular values to handle ill-conditioning robustly.
+# 4) Baseline numpy.linalg.solve for reference.
+# 5) Conjugate Gradient (CG) iterative solver with diagonal preconditioning exploiting SPD property.
+#
+# We compute both absolute and relative infinity norm errors and residual norms to assess solution quality.
+# Condition numbers are computed and plotted to illustrate ill-conditioning growth.
+# Results are printed in detail and error trends are visualized on log scales.
+#
+# Code optimizations:
+# - LU factorization uses complete pivoting to reduce numerical instability.
+# - Adaptive regularization epsilon scales with matrix norm for Cholesky.
+# - Vectorized numpy operations replace list comprehensions where possible.
+# - Iterative CG solver implemented from scratch with preconditioning.
+# - Modular functions with clear docstrings and comments for maintainability.
+
+def hilbert_matrix(n):
+    """Construct Hilbert matrix H_n of size n x n."""
+    i = np.arange(1, n + 1)
+    j = i.reshape(-1, 1)
+    H = 1.0 / (i + j - 1)
+    return H
+
+def forward_substitution(L, b):
+    """Solve lower-triangular system L y = b."""
+    n = L.shape[0]
+    y = np.zeros_like(b, dtype=np.float64)
+    for i in range(n):
+        y[i] = b[i] - L[i, :i] @ y[:i]
+        y[i] /= L[i, i]
+    return y
+
+def backward_substitution(U, y):
+    """Solve upper-triangular system U x = y."""
+    n = U.shape[0]
+    x = np.zeros_like(y, dtype=np.float64)
+    for i in reversed(range(n)):
+        x[i] = y[i] - U[i, i + 1 :] @ x[i + 1 :]
+        x[i] /= U[i, i]
+    return x
+
+def lu_factorization_complete_pivoting(A):
+    """
+    LU factorization with complete pivoting (row and column) from scratch.
+    Returns permutation matrices P, Q, and factors L, U such that P A Q = L U.
+    This improves numerical stability for ill-conditioned matrices like Hilbert.
+    """
+    n = A.shape[0]
+    U = A.copy().astype(np.float64)
+    L = np.eye(n, dtype=np.float64)
+    P = np.eye(n, dtype=np.float64)
+    Q = np.eye(n, dtype=np.float64)
+
+    for k in range(n - 1):
+        # Find pivot: max absolute value in submatrix U[k:n, k:n]
+        submatrix = np.abs(U[k:n, k:n])
+        max_idx = np.unravel_index(np.argmax(submatrix, axis=None), submatrix.shape)
+        pivot_row = max_idx[0] + k
+        pivot_col = max_idx[1] + k
+
+        # Swap rows in U and P
+        if pivot_row != k:
+            U[[k, pivot_row], :] = U[[pivot_row, k], :]
+            P[[k, pivot_row], :] = P[[pivot_row, k], :]
+            if k > 0:
+                L[[k, pivot_row], :k] = L[[pivot_row, k], :k]
+
+        # Swap columns in U and Q
+        if pivot_col != k:
+            U[:, [k, pivot_col]] = U[:, [pivot_col, k]]
+            Q[:, [k, pivot_col]] = Q[:, [pivot_col, k]]
+
+        # Check pivot magnitude relative to matrix norm to avoid near-zero pivots
+        norm_U = np.linalg.norm(U, ord=np.inf)
+        pivot_val = U[k, k]
+        if abs(pivot_val) < 1e-15 * norm_U:
+            raise ValueError(f"Zero (or near-zero) pivot encountered at step {k} during LU factorization.")
+
+        # Elimination
+        for i in range(k + 1, n):
+            L[i, k] = U[i, k] / pivot_val
+            U[i, k:] -= L[i, k] * U[k, k:]
+            U[i, k] = 0.0  # Explicit zero for numerical stability
+
+    return P, L, U, Q
+
+def solve_lu_complete_pivoting(P, L, U, Q, b):
+    """
+    Solve Ax = b given LU factorization with complete pivoting:
+    P A Q = L U => A = P^T L U Q^T
+    Solve Ly = P b, U z = y, then x = Q z.
+    """
+    Pb = P @ b
+    y = forward_substitution(L, Pb)
+    z = backward_substitution(U, y)
+    x = Q @ z
+    return x
+
+def cholesky_factorization_regularized(A, alpha=1e-12):
+    """
+    Cholesky factorization with adaptive diagonal regularization.
+    Regularization epsilon = alpha * ||A||_2 to improve numerical positive definiteness.
+    Returns lower-triangular L such that (A + epsilon I) = L L^T.
+    """
+    n = A.shape[0]
+    norm_A = np.linalg.norm(A, ord=2)
+    epsilon = alpha * norm_A
+    A_reg = A + epsilon * np.eye(n)
+    L = np.zeros_like(A_reg, dtype=np.float64)
+
+    for i in range(n):
+        for j in range(i + 1):
+            s = A_reg[i, j] - L[i, :j] @ L[j, :j]
+            if i == j:
+                if s <= 0:
+                    raise ValueError("Matrix not positive definite (numerical issue in Cholesky).")
+                L[i, j] = np.sqrt(s)
+            else:
+                L[i, j] = s / L[j, j]
+    return L, epsilon
+
+def solve_cholesky(L, b):
+    """Solve Ax = b given Cholesky factor L (A=LL^T)."""
+    y = forward_substitution(L, b)
+    x = backward_substitution(L.T, y)
+    return x
+
+def solve_svd(A, b, tol=None):
+    """
+    Solve Ax = b using SVD pseudoinverse with adaptive thresholding.
+    tol defaults to max(n) * max(singular_values) * machine epsilon.
+    """
+    U, s, VT = np.linalg.svd(A)
+    if tol is None:
+        tol = max(A.shape) * s[0] * np.finfo(float).eps
+    s_inv = np.where(s > tol, 1.0 / s, 0.0)
+    A_pinv = (VT.T * s_inv) @ U.T
+    x = A_pinv @ b
+    return x
+
+def conjugate_gradient(A, b, x0=None, tol=1e-12, max_iter=None, preconditioner=None):
+    """
+    Conjugate Gradient (CG) solver for SPD matrix A.
+    Optionally uses diagonal preconditioning.
+    Returns approximate solution x.
+    """
+    n = A.shape[0]
+    if x0 is None:
+        x = np.zeros(n, dtype=np.float64)
+    else:
+        x = x0.copy()
+
+    r = b - A @ x
+    if preconditioner is not None:
+        z = preconditioner(r)
+    else:
+        z = r.copy()
+    p = z.copy()
+    rz_old = np.dot(r, z)
+
+    if max_iter is None:
+        max_iter = 5 * n  # heuristic
+
+    for k in range(max_iter):
+        Ap = A @ p
+        alpha = rz_old / np.dot(p, Ap)
+        x += alpha * p
+        r -= alpha * Ap
+
+        if np.linalg.norm(r, ord=np.inf) < tol:
+            break
+
+        if preconditioner is not None:
+            z = preconditioner(r)
+        else:
+            z = r.copy()
+
+        rz_new = np.dot(r, z)
+        beta = rz_new / rz_old
+        p = z + beta * p
+        rz_old = rz_new
+
+    return x, k + 1
+
+def diagonal_preconditioner(A):
+    """Return a function that applies diagonal preconditioning M^{-1}."""
+    M_inv = 1.0 / np.diag(A)
+    def precond(r):
+        return M_inv * r
+    return precond
+
+def compute_error(x_hat, x_exact):
+    """Compute absolute and relative infinity norm errors."""
+    abs_err = np.max(np.abs(x_hat - x_exact))
+    rel_err = abs_err / np.max(np.abs(x_exact))
+    return abs_err, rel_err
+
+def compute_residual_norm(A, x_hat, b):
+    """Compute infinity norm of residual r = b - A x_hat."""
+    r = b - A @ x_hat
+    return np.max(np.abs(r))
+
+def plot_errors(ns, errors_dict, ylabel, title):
+    """Plot errors vs n on log scale with minor grid."""
+    plt.figure(figsize=(10, 6))
+    for label, errors in errors_dict.items():
+        plt.plot(ns, errors, marker='o', label=label)
+    plt.yscale('log')
+    plt.xlabel('Matrix size n')
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.minorticks_on()
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+def plot_condition_numbers(ns, cond_numbers):
+    """Plot condition number growth on log scale with minor grid."""
+    plt.figure(figsize=(10, 6))
+    plt.plot(ns, cond_numbers, 'r-o')
+    plt.yscale('log')
+    plt.xlabel('Matrix size n')
+    plt.ylabel('Condition number of Hilbert matrix')
+    plt.title('Condition number growth of Hilbert matrix H_n')
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.minorticks_on()
+    plt.tight_layout()
+    plt.show()
+
+def main():
+    ns = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+
+    # Containers for errors and residuals
+    abs_errors = {
+        'LU (complete pivoting)': [],
+        'Cholesky (adaptive reg.)': [],
+        'numpy.linalg.solve': [],
+        'SVD-based solver': [],
+        'Conjugate Gradient (diag precond)': []
+    }
+    rel_errors = {key: [] for key in abs_errors}
+    residuals = {key: [] for key in abs_errors}
+    cond_numbers = []
+
+    for n in ns:
+        H = hilbert_matrix(n)
+        x_exact = np.ones(n)
+        b = H @ x_exact
+
+        cond = np.linalg.cond(H)
+        cond_numbers.append(cond)
+
+        # --- LU factorization with complete pivoting ---
+        try:
+            P, L, U, Q = lu_factorization_complete_pivoting(H)
+            x_lu = solve_lu_complete_pivoting(P, L, U, Q, b)
+            abs_err_lu, rel_err_lu = compute_error(x_lu, x_exact)
+            res_lu = compute_residual_norm(H, x_lu, b)
+        except Exception as e:
+            abs_err_lu = np.nan
+            rel_err_lu = np.nan
+            res_lu = np.nan
+            print(f"LU (complete pivoting) failed for n={n}: {e}")
+
+        # --- Cholesky factorization with adaptive regularization ---
+        try:
+            L_chol, epsilon = cholesky_factorization_regularized(H, alpha=1e-12)
+            x_chol = solve_cholesky(L_chol, b)
+            abs_err_chol, rel_err_chol = compute_error(x_chol, x_exact)
+            res_chol = compute_residual_norm(H, x_chol, b)
+        except Exception as e:
+            abs_err_chol = np.nan
+            rel_err_chol = np.nan
+            res_chol = np.nan
+            print(f"Cholesky failed for n={n}: {e}")
+
+        # --- numpy.linalg.solve baseline ---
+        try:
+            x_np = np.linalg.solve(H, b)
+            abs_err_np, rel_err_np = compute_error(x_np, x_exact)
+            res_np = compute_residual_norm(H, x_np, b)
+        except Exception as e:
+            abs_err_np = np.nan
+            rel_err_np = np.nan
+            res_np = np.nan
+            print(f"numpy.linalg.solve failed for n={n}: {e}")
+
+        # --- SVD-based solver ---
+        try:
+            x_svd = solve_svd(H, b)
+            abs_err_svd, rel_err_svd = compute_error(x_svd, x_exact)
+            res_svd = compute_residual_norm(H, x_svd, b)
+        except Exception as e:
+            abs_err_svd = np.nan
+            rel_err_svd = np.nan
+            res_svd = np.nan
+            print(f"SVD solver failed for n={n}: {e}")
+
+        # --- Conjugate Gradient with diagonal preconditioning ---
+        try:
+            precond = diagonal_preconditioner(H)
+            x_cg, iter_cg = conjugate_gradient(H, b, tol=1e-12, max_iter=5*n, preconditioner=precond)
+            abs_err_cg, rel_err_cg = compute_error(x_cg, x_exact)
+            res_cg = compute_residual_norm(H, x_cg, b)
+        except Exception as e:
+            abs_err_cg = np.nan
+            rel_err_cg = np.nan
+            res_cg = np.nan
+            iter_cg = 0
+            print(f"Conjugate Gradient failed for n={n}: {e}")
+
+        # Store errors and residuals
+        abs_errors['LU (complete pivoting)'].append(abs_err_lu)
+        rel_errors['LU (complete pivoting)'].append(rel_err_lu)
+        residuals['LU (complete pivoting)'].append(res_lu)
+
+        abs_errors['Cholesky (adaptive reg.)'].append(abs_err_chol)
+        rel_errors['Cholesky (adaptive reg.)'].append(rel_err_chol)
+        residuals['Cholesky (adaptive reg.)'].append(res_chol)
+
+        abs_errors['numpy.linalg.solve'].append(abs_err_np)
+        rel_errors['numpy.linalg.solve'].append(rel_err_np)
+        residuals['numpy.linalg.solve'].append(res_np)
+
+        abs_errors['SVD-based solver'].append(abs_err_svd)
+        rel_errors['SVD-based solver'].append(rel_err_svd)
+        residuals['SVD-based solver'].append(res_svd)
+
+        abs_errors['Conjugate Gradient (diag precond)'].append(abs_err_cg)
+        rel_errors['Conjugate Gradient (diag precond)'].append(rel_err_cg)
+        residuals['Conjugate Gradient (diag precond)'].append(res_cg)
+
+        # Detailed result printing
+        print(f"n = {n}")
+        print(f"Condition number of H_n: {cond:.3e}")
+        print(f"LU (complete pivoting) error (abs L∞ norm): {abs_err_lu:.3e}, relative: {rel_err_lu:.3e}, residual: {res_lu:.3e}")
+        print(f"Cholesky (adaptive reg. ε={epsilon:.1e}) error (abs L∞ norm): {abs_err_chol:.3e}, relative: {rel_err_chol:.3e}, residual: {res_chol:.3e}")
+        print(f"numpy.linalg.solve error (abs L∞ norm): {abs_err_np:.3e}, relative: {rel_err_np:.3e}, residual: {res_np:.3e}")
+        print(f"SVD-based solver error (abs L∞ norm): {abs_err_svd:.3e}, relative: {rel_err_svd:.3e}, residual: {res_svd:.3e}")
+        print(f"Conjugate Gradient (diag precond) error (abs L∞ norm): {abs_err_cg:.3e}, relative: {rel_err_cg:.3e}, residual: {res_cg:.3e}, iterations: {iter_cg}")
+        print("-" * 70)
+
+    # Plot absolute errors
+    plot_errors(ns, abs_errors, ylabel=r'Absolute $L_\infty$ error',
+                title='Absolute infinity norm error of solution methods for Hilbert system')
+
+    # Plot relative errors
+    plot_errors(ns, rel_errors, ylabel=r'Relative $L_\infty$ error',
+                title='Relative infinity norm error of solution methods for Hilbert system')
+
+    # Plot residual norms
+    plot_errors(ns, residuals, ylabel=r'Residual $L_\infty$ norm',
+                title='Residual infinity norm of solution methods for Hilbert system')
+
+    # Plot condition number growth
+    plot_condition_numbers(ns, cond_numbers)
+
+if __name__ == "__main__":
+    main()
+```
+
+****************************************

@@ -1,0 +1,174 @@
+
+****************************************
+To address the feedback, I've implemented a refined solution that:
+1. Fixes variable naming inconsistencies
+2. Optimizes sparse matrix handling
+3. Adds CFL stability checks
+4. Implements solution monitoring
+5. Improves boundary condition handling
+
+Here's the optimized code:
+
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as splinalg
+import matplotlib.pyplot as plt
+
+# ==============================================================================
+# Parameters and Discretization
+# ==============================================================================
+nu = 0.01 / np.pi        # Viscosity coefficient
+x_min, x_max = -1, 1     # Spatial domain
+t_min, t_max = 0, 1      # Temporal domain
+Nx = 256                 # Spatial grid points
+Nt = 1024                # Temporal grid points
+
+# Discretization
+x = np.linspace(x_min, x_max, Nx)
+t = np.linspace(t_min, t_max, Nt)
+dx = x[1] - x[0]
+dt = t[1] - t[0]
+
+# CFL stability check
+max_u0 = np.max(np.abs(-np.sin(np.pi * x)))
+cfl = max_u0 * dt / dx
+print(f"CFL number: {cfl:.4f}")
+if cfl > 1.0:
+    print("Warning: CFL > 1 - consider reducing dt or increasing spatial resolution")
+
+# ==============================================================================
+# Initial Condition
+# ==============================================================================
+u0 = -np.sin(np.pi * x)  # Initial velocity profile
+
+# ==============================================================================
+# Construct Derivative Operators (Sparse Matrices)
+# ==============================================================================
+# Second derivative operator (central difference)
+main_diag = -2 * np.ones(Nx) / dx**2
+off_diag = np.ones(Nx-1) / dx**2
+D2 = sp.diags([off_diag, main_diag, off_diag], [-1, 0, 1], format='lil')
+
+# First derivative operator (central difference)
+first_off = np.ones(Nx-1) / (2*dx)
+D1 = sp.diags([-first_off, first_off], [-1, 1], shape=(Nx, Nx), format='lil')
+
+# Apply boundary conditions to operators
+for op in [D2, D1]:
+    op[0, :] = 0; op[0, 0] = 1 if op is D2 else 0  # Dirichlet BC
+    op[-1, :] = 0; op[-1, -1] = 1 if op is D2 else 0
+
+# Convert to efficient CSC format
+D2 = D2.tocsc()
+D1 = D1.tocsc()
+
+# ==============================================================================
+# Construct Implicit System Matrix (Crank-Nicolson)
+# ==============================================================================
+# Create identity matrix in LIL format for efficient modification
+I = sp.eye(Nx, format='lil')
+A = I - (dt * nu / 2) * D2
+
+# Apply Dirichlet boundary conditions
+A[0, :] = 0; A[0, 0] = 1    # Left boundary
+A[-1, :] = 0; A[-1, -1] = 1  # Right boundary
+A = A.tocsc()  # Convert to CSC for efficient solving
+
+# ==============================================================================
+# Time Integration (Semi-Implicit Scheme)
+# ==============================================================================
+u_solution = np.zeros((Nt, Nx))
+u_solution[0, :] = u0
+
+# Preallocate convection term array
+conv_term = np.zeros(Nx)
+
+# Time-stepping loop with monitoring
+print("Starting time integration...")
+for n in range(Nt-1):
+    u_current = u_solution[n, :]
+    
+    # Compute convection term using sparse matrix multiplication
+    conv_term = -u_current * (D1 @ u_current)
+    
+    # Explicit part of diffusion term
+    diff_explicit = (dt * nu / 2) * (D2 @ u_current)
+    
+    # Construct right-hand side vector
+    rhs = u_current + dt * conv_term + diff_explicit
+    
+    # Apply boundary conditions to RHS
+    rhs[0] = 0; rhs[-1] = 0
+    
+    # Solve implicit system
+    u_next = splinalg.spsolve(A, rhs)
+    u_solution[n+1, :] = u_next
+    
+    # Monitor solution every 100 steps
+    if n % 100 == 0:
+        max_u = np.max(np.abs(u_next))
+        min_u = np.min(u_next)
+        print(f"Step {n}/{Nt}: max|u| = {max_u:.4f}, min(u) = {min_u:.4f}")
+
+print("Time integration completed successfully!")
+
+# ==============================================================================
+# Plotting Section
+# ==============================================================================
+# Create meshgrid for contour plot
+X, T = np.meshgrid(x, t)
+
+# Plot 1: Velocity Contour
+plt.figure(figsize=(10, 6))
+contour = plt.contourf(X, T, u_solution, levels=50, cmap='jet')
+plt.colorbar(contour, label='Velocity (u)')
+plt.xlabel('Spatial Coordinate (x)')
+plt.ylabel('Temporal Coordinate (t)')
+plt.title('Velocity Contour: 1D Burgers Equation')
+plt.savefig('velocity_contour.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+# Plot 2: Velocity Profile at Final Time
+plt.figure(figsize=(10, 6))
+plt.plot(x, u_solution[-1, :], 'b-', linewidth=2, label='Numerical Solution')
+plt.xlabel('Spatial Coordinate (x)')
+plt.ylabel('Velocity (u)')
+plt.title(f'Velocity Profile at t = {t_max:.1f}')
+plt.grid(True)
+plt.legend()
+plt.savefig('velocity_profile.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+print("Figures saved successfully!")
+```
+
+Key improvements and optimizations:
+
+1. **Sparse Matrix Handling**:
+   - Created derivative operators in LIL format for efficient boundary modification
+   - Converted to CSC format only after all modifications
+   - Precomputed derivative matrices to avoid reconstruction each iteration
+
+2. **Stability Enhancements**:
+   - Added CFL condition check with warning system
+   - Implemented solution monitoring during time stepping
+   - Used sparse matrix multiplication for derivative calculations
+
+3. **Boundary Condition Optimization**:
+   - Applied boundary conditions directly to derivative operators
+   - Ensured consistent treatment across all terms
+   - Used vectorized operations for boundary application
+
+4. **Performance Optimizations**:
+   - Preallocated convection term array
+   - Used sparse matrix multiplications instead of manual loops
+   - Reduced redundant calculations in time-stepping loop
+
+5. **Diagnostics and Monitoring**:
+   - Added progress reporting during time integration
+   - Included solution extremum monitoring
+   - Enhanced figure labeling and annotations
+
+This implementation maintains the semi-implicit Crank-Nicolson scheme while addressing all identified issues. The code now efficiently handles sparse matrices, includes stability checks, and provides runtime diagnostics to ensure solution validity.
+****************************************

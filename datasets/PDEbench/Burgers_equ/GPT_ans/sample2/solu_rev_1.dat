@@ -1,0 +1,186 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.sparse import diags
+from scipy.sparse.linalg import spsolve
+
+# Technical explanation:
+# We solve the 1-D viscous Burgers' equation:
+#    u_t + u u_x = nu u_xx
+# on the domain x in [-1,1], t in [0,1], with initial condition u(x,0) = -sin(pi x)
+# and Dirichlet boundary conditions u(-1,t) = u(1,t) = 0.
+#
+# Numerical method:
+# - Time discretization: IMEX Crank-Nicolson scheme
+#   * Diffusion term treated implicitly with Crank-Nicolson (second-order, unconditionally stable)
+#   * Nonlinear convection term treated explicitly at previous time step
+# - Spatial discretization: second-order central differences for both convection and diffusion
+# - To reduce oscillations near steep gradients, the convection derivative u_x is discretized using a first-order upwind scheme,
+#   which introduces numerical diffusion and stabilizes the solution.
+#
+# This approach balances stability, accuracy, and computational efficiency.
+# The implicit diffusion treatment allows larger time steps without oscillations,
+# and the upwind convection discretization controls spurious oscillations near sharp gradients.
+
+# ---------------------------
+# Parameters and domain setup
+nu = 0.01 / np.pi  # viscosity
+x_start, x_end = -1.0, 1.0
+t_start, t_end = 0.0, 1.0
+
+Nx = 201  # number of spatial points including boundaries
+x = np.linspace(x_start, x_end, Nx)
+dx = x[1] - x[0]
+
+# Initial guess for time step based on convection CFL condition
+max_u_init = 1.0  # max initial velocity magnitude ~1 from initial condition
+dt_cfl = 0.8 * dx / max_u_init  # CFL condition for convection (upwind stable)
+Nt = 5000  # initial number of time steps
+dt = (t_end - t_start) / Nt
+
+# Adjust dt and Nt to satisfy CFL condition for convection explicitly
+if dt > dt_cfl:
+    dt = dt_cfl
+    Nt = int(np.ceil((t_end - t_start) / dt))
+    dt = (t_end - t_start) / Nt  # adjust dt exactly
+
+# ---------------------------
+# Initial condition: u(x,0) = -sin(pi x)
+u = -np.sin(np.pi * x)
+
+# Enforce Dirichlet BCs at initial time
+u[0] = 0.0
+u[-1] = 0.0
+
+# ---------------------------
+# Precompute coefficients for Crank-Nicolson diffusion implicit matrix
+r = nu * dt / dx**2
+
+# Construct sparse matrix A for second derivative with Dirichlet BCs
+# Interior points: i=1,...,Nx-2
+diagonals = [
+    np.ones(Nx - 3),        # lower diagonal
+    -2 * np.ones(Nx - 2),   # main diagonal
+    np.ones(Nx - 3)         # upper diagonal
+]
+offsets = [-1, 0, 1]
+A = diags(diagonals, offsets, shape=(Nx - 2, Nx - 2), format='csc')
+
+# Left matrix: (I - r/2 * A)
+LHS = diags([np.ones(Nx - 2)], [0], shape=(Nx - 2, Nx - 2), format='csc') - (r / 2) * A
+
+# Right matrix: (I + r/2 * A)
+RHS_mat = diags([np.ones(Nx - 2)], [0], shape=(Nx - 2, Nx - 2), format='csc') + (r / 2) * A
+
+# ---------------------------
+# Function to compute u_x at interior points using first-order upwind scheme
+# This replaces central difference for convection term to reduce oscillations
+def compute_ux_upwind(u, dx):
+    ux = np.zeros_like(u)
+    # For positive velocity, use backward difference; for negative velocity, use forward difference
+    # Here velocity u is used to determine upwind direction pointwise
+    for i in range(1, len(u) - 1):
+        if u[i] >= 0:
+            ux[i] = (u[i] - u[i - 1]) / dx
+        else:
+            ux[i] = (u[i + 1] - u[i]) / dx
+    # Boundary points: use one-sided differences consistent with BCs
+    ux[0] = (u[1] - u[0]) / dx  # forward difference at left boundary
+    ux[-1] = (u[-1] - u[-2]) / dx  # backward difference at right boundary
+    return ux
+
+# ---------------------------
+# Prepare storage for solution at all time steps
+u_all = np.zeros((Nt + 1, Nx))
+u_all[0, :] = u.copy()
+
+# Store snapshots every N_snap steps for plotting
+N_snap = Nt // 10
+snapshots = []
+time_snapshots = []
+
+# ---------------------------
+# Time-stepping loop
+for n in range(Nt):
+    # Compute convection term u * u_x at time n using upwind derivative
+    ux = compute_ux_upwind(u, dx)
+    conv_term = u * ux  # nonlinear convection term at time n (explicit)
+
+    # Right hand side vector for interior points
+    b = RHS_mat.dot(u[1:-1]) - dt * conv_term[1:-1]
+
+    # Boundary conditions are zero Dirichlet, so no boundary terms added to b
+
+    # Solve linear system for u^{n+1} interior points
+    u_interior = spsolve(LHS, b)
+
+    # Update solution vector
+    u[1:-1] = u_interior
+
+    # Enforce Dirichlet BCs
+    u[0] = 0.0
+    u[-1] = 0.0
+
+    # Store solution
+    u_all[n + 1, :] = u.copy()
+
+    # Store snapshots for plotting
+    if (n + 1) % N_snap == 0 or n == Nt - 1:
+        snapshots.append(u.copy())
+        time_snapshots.append(t_start + (n + 1) * dt)
+
+# Convert snapshots to numpy array for plotting
+snapshots = np.array(snapshots)
+time_snapshots = np.array(time_snapshots)
+
+# ---------------------------
+# Plot 1: Contour plot of velocity u(x,t)
+plt.figure(figsize=(8, 6))
+X, T = np.meshgrid(x, np.linspace(t_start, t_end, Nt + 1))
+cp = plt.contourf(X, T, u_all, levels=50, cmap='jet')
+plt.colorbar(cp, label='Velocity u(x,t)')
+plt.xlabel('x')
+plt.ylabel('t')
+plt.title('Contour plot of velocity u(x,t) for 1D Burgers equation')
+plt.tight_layout()
+plt.savefig('burgers_velocity_contour.png')
+plt.close()
+
+# ---------------------------
+# Plot 2: Velocity profiles at selected time snapshots
+plt.figure(figsize=(8, 6))
+for i, t_snap in enumerate(time_snapshots):
+    plt.plot(x, snapshots[i], label=f't={t_snap:.3f}')
+plt.xlabel('x')
+plt.ylabel('Velocity u(x,t)')
+plt.title('Velocity profiles at selected times')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig('burgers_velocity_profiles.png')
+plt.close()
+
+# ---------------------------
+# Detailed result printing within code architecture
+print("1D Burgers equation solved with IMEX Crank-Nicolson scheme and upwind convection discretization.")
+print(f"Domain: x in [{x_start}, {x_end}], t in [{t_start}, {t_end}]")
+print(f"Spatial points: {Nx}, Time steps: {Nt}, dt: {dt:.5e}, dx: {dx:.5e}")
+print(f"Viscosity nu = {nu:.5e}")
+print(f"Stored {len(time_snapshots)} solution snapshots for plotting.")
+print("Figures saved as 'burgers_velocity_contour.png' and 'burgers_velocity_profiles.png'.")
+
+# ---------------------------
+# Explanation of optimizations and refinements:
+# - Renamed initial velocity array to 'u' to avoid confusion with viscosity 'nu'.
+# - Adjusted time step dt before simulation to satisfy convection CFL condition explicitly.
+# - Replaced central difference for convection derivative u_x with a first-order upwind scheme
+#   to reduce oscillations near steep gradients and improve numerical stability.
+# - Ensured consistent naming and storage of solution arrays.
+# - Kept sparse matrix approach for implicit diffusion solve for efficiency.
+# - Modularized convection derivative computation into a dedicated function.
+# - Stored snapshots at regular intervals for memory efficiency and plotting.
+# - Added detailed print statements summarizing simulation parameters and results.
+```
+****************************************

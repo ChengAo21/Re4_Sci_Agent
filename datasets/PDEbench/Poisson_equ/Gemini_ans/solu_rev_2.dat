@@ -1,0 +1,416 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+from scipy.sparse import coo_matrix, csr_matrix, csc_matrix
+from scipy.sparse.linalg import cg, spilu, LinearOperator
+import time
+
+# Technical explanation for the solving algorithm.
+# The problem involves solving the 2D Laplace equation, -Δu = 0, on a complex domain
+# which is a square with four circular holes. Dirichlet boundary conditions are
+# specified: u=1 on the outer square boundary and u=0 on the boundaries of the holes.
+#
+# Algorithm: Finite Difference Method (FDM) on a Cartesian Grid with Masking
+#
+# 1. Discretization:
+#    The continuous domain [-0.5, 0.5]^2 is discretized into a uniform Cartesian grid
+#    with (N+1)x(N+1) points. The grid spacing is h = 1.0 / N.
+#
+# 2. Grid Point Classification:
+#    Each grid point (x_i, y_j) is classified into one of three categories:
+#    a. Outer Boundary Points: Points lying on the perimeter of the square [-0.5, 0.5]^2.
+#       For these points, the solution u is fixed to 1, as per the Dirichlet boundary condition.
+#    b. Hole Points: Points lying inside or exactly on the boundary of any of the four
+#       circular holes. These points are considered "removed" from the computational domain.
+#       However, in the FDM implementation, we treat them as points with fixed Dirichlet
+#       values (u=0), effectively imposing the boundary condition on the staircase
+#       approximation of the circular boundaries.
+#    c. Unknown (Interior) Points: All other points that are neither on the outer boundary
+#       nor inside a hole. These are the points for which the solution u needs to be found.
+#
+# 3. Finite Difference Stencil:
+#    For each unknown point (i, j), the Laplace equation -Δu = 0 is approximated using
+#    the standard 5-point central difference stencil:
+#    - (u_{i+1,j} - 2u_{i,j} + u_{i-1,j}) / h^2 - (u_{i,j+1} - 2u_{i,j} + u_{i,j-1}) / h^2 = 0
+#    Multiplying by -h^2 and rearranging, we get:
+#    4u_{i,j} - u_{i+1,j} - u_{i-1,j} - u_{i,j+1} - u_{i,j-1} = 0
+#
+# 4. System Assembly:
+#    This equation is applied to every unknown point. This generates a system of linear
+#    equations of the form Au = b, where:
+#    - A is a sparse matrix representing the discretized Laplacian operator.
+#    - u is a vector containing the unknown values of u at the interior grid points.
+#    - b is a vector containing contributions from the known boundary conditions (outer
+#      square boundary and hole boundaries).
+#    Specifically, for each unknown point (i, j) mapped to a 1D index k:
+#    - The diagonal element A[k, k] is 4.
+#    - For each neighbor (ni, nj) of (i, j):
+#      - If (ni, nj) is also an unknown point, A[k, map_to_1D_index(ni, nj)] is -1.
+#      - If (ni, nj) is a known boundary point (outer or hole), its value (1 or 0)
+#        is moved to the right-hand side vector b[k].
+#    The matrix A is highly sparse, making sparse matrix solvers efficient.
+#    Optimization: The matrix A is assembled using the coo_matrix format by collecting
+#    (row, col, data) tuples. This is generally more efficient for constructing large
+#    sparse matrices than lil_matrix as it avoids Python object overhead for individual
+#    element assignments. The coo_matrix is then converted to csr_matrix for efficient
+#    matrix-vector products required by iterative solvers.
+#    Optimization: The mapping from 2D grid indices (i, j) to a 1D linear system index k
+#    is performed using a NumPy 2D array (`idx_map_array`) instead of a Python dictionary.
+#    This allows for faster, C-level lookups during the matrix assembly phase, reducing
+#    Python overhead for each neighbor check.
+#
+# 5. Solving the Linear System:
+#    The sparse linear system Au = b is solved using an iterative solver from `scipy.sparse.linalg`.
+#    The Conjugate Gradient (CG) method is chosen because the matrix A resulting from the
+#    discretized Laplace operator is symmetric and positive definite. CG is an efficient
+#    iterative method for such systems.
+#    The `rtol` and `atol` parameters are used to control the convergence criteria of the
+#    iterative solver. `atol` is explicitly used as requested to avoid potential `TypeError`
+#    issues with `tol` in some contexts.
+#    Optimization: An Incomplete LU (ILU) preconditioner is used with the CG solver to
+#    accelerate convergence, especially for larger problem sizes. The input matrix to `spilu`
+#    is explicitly converted to CSC format (`A.tocsc()`) to suppress a common SciPy warning
+#    about internal format conversion.
+#
+# 6. Post-processing and Visualization:
+#    The 1D solution vector is reshaped back into the 2D grid structure.
+#    The solution u is then visualized using `matplotlib.pyplot.contourf` to show the
+#    potential distribution. `matplotlib.pyplot.contour` is also used to add contour lines
+#    for better visualization of gradients. The circular holes are overlaid on the plot for clarity.
+#    The 'jet' colormap is used as requested. The saved filename includes the grid resolution (N)
+#    for better tracking of results.
+#
+# Advantages of FDM for this problem:
+# - Simplicity: Relatively straightforward to implement compared to FEM or BIM.
+# - Standard Libraries: Leverages `numpy` for array operations and `scipy.sparse.linalg`
+#   for efficient sparse linear system solving.
+#
+# Limitations:
+# - Staircase Approximation: The circular boundaries are approximated by the grid lines,
+#   leading to a "staircase" effect. This can reduce accuracy near the boundaries
+#   compared to methods that use body-fitted meshes (like FEM). Higher grid resolution (larger N)
+#   can mitigate this but increases computational cost.
+# - Grid Resolution: Higher accuracy requires finer grids, which increases the number
+#   of unknowns and computational cost.
+
+def setup_grid_and_mask(N, x_min, x_max, y_min, y_max, radius, circle_centers):
+    """
+    Sets up the computational grid, initializes the solution array with boundary conditions,
+    and classifies grid points into unknown, outer boundary, and hole points.
+    It also creates a 2D mapping array for 1D indexing of unknown points.
+
+    Args:
+        N (int): Number of intervals along one side of the square domain.
+                 The grid will have (N+1)x(N+1) points.
+        x_min (float): Minimum x-coordinate of the domain.
+        x_max (float): Maximum x-coordinate of the domain.
+        y_min (float): Minimum y-coordinate of the domain.
+        y_max (float): Maximum y-coordinate of the domain.
+        radius (float): Radius of the circular holes.
+        circle_centers (list of tuple): List of (cx, cy) coordinates for the center of each circle.
+
+    Returns:
+        tuple: A tuple containing:
+            - X (numpy.ndarray): 2D array of x-coordinates for the grid.
+            - Y (numpy.ndarray): 2D array of y-coordinates for the grid.
+            - u (numpy.ndarray): Initialized 2D solution array with boundary conditions.
+            - is_unknown (numpy.ndarray): Boolean 2D array, True for unknown points.
+            - idx_map_array (numpy.ndarray): 2D integer array mapping (i, j) to 1D index k for unknown points.
+                                             -1 for known points.
+            - unknown_coords (list): List of (i, j) tuples for unknown points.
+            - num_unknowns (int): Total number of unknown points.
+            - h (float): Grid spacing.
+    """
+    # Grid setup
+    h = (x_max - x_min) / N  # Grid spacing
+    x = np.linspace(x_min, x_max, N + 1)
+    y = np.linspace(y_min, y_max, N + 1)
+    X, Y = np.meshgrid(x, y)
+
+    # Initialize solution array
+    # u will store the solution values on the grid.
+    # Known boundary conditions will be set directly.
+    u = np.zeros((N + 1, N + 1))
+
+    # Identify grid points and apply boundary conditions
+    # is_outer_boundary: True for points on the square's perimeter, using np.isclose for float comparison.
+    is_outer_boundary = (np.isclose(X, x_min) | np.isclose(X, x_max) |
+                         np.isclose(Y, y_min) | np.isclose(Y, y_max))
+    u[is_outer_boundary] = 1.0  # u = 1 on outer boundary
+
+    # is_inside_hole: True for points inside or on the boundary of any of the four circles.
+    is_inside_hole = np.zeros((N + 1, N + 1), dtype=bool)
+    for cx, cy in circle_centers:
+        is_inside_hole |= ((X - cx)**2 + (Y - cy)**2 <= radius**2)
+    u[is_inside_hole] = 0.0  # u = 0 inside holes (effectively on hole boundaries)
+
+    # is_unknown: True for points where u needs to be solved for.
+    # These are points that are neither on the outer boundary nor inside any hole.
+    is_unknown = ~(is_outer_boundary | is_inside_hole)
+
+    # Map 2D (i, j) indices of unknown points to a 1D index k for the linear system.
+    # Optimized: Using a 2D NumPy array for direct indexing instead of a Python dictionary.
+    idx_map_array = -np.ones((N + 1, N + 1), dtype=int) # Initialize with -1 (sentinel for non-unknowns)
+    unknown_coords = [] # List to store (i, j) coordinates of unknown points in 1D order
+    k = 0
+    for i in range(N + 1):
+        for j in range(N + 1):
+            if is_unknown[i, j]:
+                idx_map_array[i, j] = k
+                unknown_coords.append((i, j))
+                k += 1
+
+    num_unknowns = len(unknown_coords)
+
+    # Print problem setup information
+    print("--- Problem Setup Information ---")
+    print(f"Grid resolution (N): {N}")
+    print(f"Grid spacing (h): {h:.4f}")
+    print(f"Total grid points: {(N+1)*(N+1)}")
+    print(f"Number of unknown points (equations): {num_unknowns}")
+    print(f"Number of outer boundary points: {np.sum(is_outer_boundary)}")
+    print(f"Number of hole points: {np.sum(is_inside_hole)}")
+    print("---------------------------------")
+
+    return X, Y, u, is_unknown, idx_map_array, unknown_coords, num_unknowns, h
+
+def assemble_system(N, u, is_unknown, idx_map_array, unknown_coords, num_unknowns):
+    """
+    Assembles the sparse linear system Au = b for the discretized Laplace equation.
+
+    Args:
+        N (int): Grid resolution.
+        u (numpy.ndarray): The 2D solution array, pre-filled with boundary conditions.
+        is_unknown (numpy.ndarray): Boolean 2D array indicating unknown points.
+        idx_map_array (numpy.ndarray): 2D integer array mapping (i, j) to 1D index k.
+        unknown_coords (list): List of (i, j) tuples for unknown points.
+        num_unknowns (int): Total number of unknown points.
+
+    Returns:
+        tuple: A tuple containing:
+            - A (scipy.sparse.csr_matrix): The sparse system matrix.
+            - b (numpy.ndarray): The right-hand side vector.
+    """
+    # Assemble the linear system Au = b
+    # A: Sparse matrix for the discretized Laplacian operator.
+    # b: Right-hand side vector containing boundary condition contributions.
+    start_assembly_time = time.time()
+
+    # Optimization: Using COO format for assembly.
+    # This is generally more efficient than lil_matrix for large sparse matrices
+    # as it avoids Python object overhead for individual element assignments.
+    row_indices = []
+    col_indices = []
+    data_values = []
+    b = np.zeros(num_unknowns)
+
+    # Define neighbors for 5-point stencil (relative indices)
+    neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)] # (di, dj) for (i+di, j+dj)
+
+    for k_1d, (i, j) in enumerate(unknown_coords):
+        # Diagonal term: 4u_ij
+        row_indices.append(k_1d)
+        col_indices.append(k_1d)
+        data_values.append(4.0)
+
+        for di, dj in neighbors:
+            ni, nj = i + di, j + dj  # Neighbor coordinates
+
+            # Check if neighbor is within grid bounds (should always be true for neighbors of unknown points)
+            # and if it's an unknown point or a known boundary point.
+            if is_unknown[ni, nj]:
+                # Neighbor is also an unknown point, add to matrix A
+                row_indices.append(k_1d)
+                # Optimized: Direct array lookup for 1D index
+                col_indices.append(idx_map_array[ni, nj])
+                data_values.append(-1.0)
+            else:
+                # Neighbor is a known boundary point (outer or hole), add its value to RHS b
+                b[k_1d] += u[ni, nj] # u already contains the boundary values (1 or 0)
+
+    # Create COO matrix and convert to CSR for efficient matrix-vector products (for CG)
+    A = coo_matrix((data_values, (row_indices, col_indices)), shape=(num_unknowns, num_unknowns)).tocsr()
+    end_assembly_time = time.time()
+    assembly_time = end_assembly_time - start_assembly_time
+
+    print("\n--- Solver Information ---")
+    print(f"Matrix A dimensions: {A.shape[0]}x{A.shape[1]}")
+    print(f"Matrix A non-zero elements: {A.nnz}")
+    print(f"Matrix A sparsity: {A.nnz / (A.shape[0] * A.shape[1]) * 100:.2f}%")
+    print(f"Time taken for system assembly: {assembly_time:.4f} seconds")
+
+    return A, b
+
+def solve_system(A, b, rtol, atol):
+    """
+    Solves the linear system Au = b using the Conjugate Gradient (CG) method
+    with an Incomplete LU (ILU) preconditioner.
+
+    Args:
+        A (scipy.sparse.csr_matrix): The system matrix.
+        b (numpy.ndarray): The right-hand side vector.
+        rtol (float): Relative tolerance for CG convergence.
+        atol (float): Absolute tolerance for CG convergence.
+
+    Returns:
+        tuple: A tuple containing:
+            - u_flat (numpy.ndarray): The 1D solution vector for unknown points.
+            - info (int): Convergence information from cg solver (0 if converged).
+            - residual_norm (float): The L2 norm of the final residual (||Au - b||).
+            - solve_time (float): Time taken for the solver.
+    """
+    # Optimization: Using an Incomplete LU (ILU) preconditioner for CG.
+    # This can significantly reduce the number of iterations and solve time
+    # for large, ill-conditioned systems.
+    M = None
+    print("Attempting to create ILU preconditioner...")
+    try:
+        # spilu computes the incomplete LU factorization.
+        # drop_tol: Drop tolerance for entries in the factorization.
+        # fill_factor: Maximum fill-in factor.
+        # These parameters control the sparsity and accuracy of the preconditioner.
+        # Optimized: Explicitly convert A to CSC format to suppress spilu warning.
+        A_csc = A.tocsc()
+        M_x = spilu(A_csc, drop_tol=1e-4, fill_factor=20)
+        # Wrap the solve method of the ILU factorization into a LinearOperator
+        # which can be passed as a preconditioner to cg.
+        M = LinearOperator(A.shape, M_x.solve)
+        print("ILU preconditioner created successfully.")
+    except RuntimeError as e:
+        print(f"Warning: Failed to create ILU preconditioner: {e}. Solving without preconditioner.")
+        M = None # Fallback to no preconditioner
+
+    # Solve the linear system using Conjugate Gradient (CG)
+    start_solve_time = time.time()
+    # Using 'rtol' for relative tolerance and 'atol' for absolute tolerance.
+    # The solver stops when norm(residual) <= max(rtol * norm(b), atol).
+    u_flat, info = cg(A, b, rtol=rtol, atol=atol, M=M)
+    end_solve_time = time.time()
+    solve_time = end_solve_time - start_solve_time
+
+    # Check solver convergence and provide detailed feedback
+    if info == 0:
+        print("CG solver converged successfully.")
+    else:
+        print(f"CG solver did NOT converge. Exit code: {info} (number of iterations).")
+        print("Warning: The Conjugate Gradient solver did not converge within the specified tolerance/iterations.")
+        print("Consider increasing maxiter, adjusting tolerances (rtol, atol), or improving the preconditioner.")
+
+    # Calculate residual norm for reliability check
+    residual_norm = np.linalg.norm(A @ u_flat - b)
+    print(f"Time taken for solving: {solve_time:.4f} seconds")
+    print(f"Final residual norm (||Au - b||): {residual_norm:.2e}")
+    print("--------------------------")
+
+    return u_flat, info, residual_norm, solve_time
+
+def plot_solution(N, X, Y, u, circle_centers, radius, x_min, x_max, y_min, y_max):
+    """
+    Plots the contour of the solution u and marks the circular holes.
+
+    Args:
+        N (int): Grid resolution, used for plot title and filename.
+        X (numpy.ndarray): 2D array of x-coordinates for the grid.
+        Y (numpy.ndarray): 2D array of y-coordinates for the grid.
+        u (numpy.ndarray): The 2D solution array.
+        circle_centers (list of tuple): List of (cx, cy) coordinates for the center of each circle.
+        radius (float): Radius of the circular holes.
+        x_min (float): Minimum x-coordinate of the domain.
+        x_max (float): Maximum x-coordinate of the domain.
+        y_min (float): Minimum y-coordinate of the domain.
+        y_max (float): Maximum y-coordinate of the domain.
+    """
+    plt.figure(figsize=(10, 8))
+    # Contour plot of u
+    # Use 50 levels for smoother contours, and 'jet' colormap as requested.
+    contour_levels = np.linspace(0, 1, 50)
+    contourf_plot = plt.contourf(X, Y, u, levels=contour_levels, cmap='jet', extend='both')
+    plt.colorbar(contourf_plot, label='Potential u (Normalized)') # Added label for clarity
+
+    # Add contour lines for better visualization of gradients
+    plt.contour(X, Y, u, levels=contour_levels, colors='k', linewidths=0.5, alpha=0.7)
+
+    # Mark the circles
+    for cx, cy in circle_centers:
+        # Draw the circle boundary
+        circle_boundary = Circle((cx, cy), radius, color='black', fill=False, linestyle='--', linewidth=2)
+        plt.gca().add_patch(circle_boundary)
+        # Fill the interior of the circles with a distinct color (e.g., lightgrey)
+        # to visually represent the removed domain/fixed zero potential.
+        circle_fill = Circle((cx, cy), radius, color='lightgrey', alpha=0.7)
+        plt.gca().add_patch(circle_fill)
+
+    # Optimized: Added N to the plot title and axis labels for better context.
+    plt.title(f'2D Laplace Equation Solution with Holes (N={N})')
+    plt.xlabel('x-coordinate')
+    plt.ylabel('y-coordinate')
+    plt.gca().set_aspect('equal', adjustable='box') # Ensure aspect ratio is equal
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    
+    # Create a custom legend entry for the circles to avoid multiple entries
+    circle_legend_patch = Circle((0,0), 0, color='black', fill=False, linestyle='--', linewidth=2)
+    plt.legend([circle_legend_patch], ['Hole Boundary'], loc='upper right')
+    plt.grid(True, linestyle=':', alpha=0.7)
+
+    # Save the figure
+    # Optimized: Included N in the filename for easier tracking of results with different resolutions.
+    plt.savefig(f'poisson_2d_solution_N{N}.png', dpi=300, bbox_inches='tight')
+    # Do not use plt.show() as requested.
+
+def main_solver(N=120, rtol=1e-6, atol=1e-8):
+    """
+    Main function to set up, solve, and plot the 2D Laplace equation problem.
+
+    Args:
+        N (int): Grid resolution (number of intervals). Default is 120.
+        rtol (float): Relative tolerance for the CG solver. Default is 1e-6.
+        atol (float): Absolute tolerance for the CG solver. Default is 1e-8.
+    """
+    # Problem parameters
+    x_min, x_max = -0.5, 0.5
+    y_min, y_max = -0.5, 0.5
+    radius = 0.1
+    circle_centers = [
+        (0.3, 0.3),
+        (-0.3, 0.3),
+        (0.3, -0.3),
+        (-0.3, -0.3)
+    ]
+
+    # Step 1: Setup grid, identify points, and apply initial boundary conditions
+    # Optimized: idx_map_array is now a NumPy array for faster lookups during assembly.
+    X, Y, u, is_unknown, idx_map_array, unknown_coords, num_unknowns, h = \
+        setup_grid_and_mask(N, x_min, x_max, y_min, y_max, radius, circle_centers)
+
+    # Step 2: Assemble the linear system Au = b
+    A, b = assemble_system(N, u, is_unknown, idx_map_array, unknown_coords, num_unknowns)
+
+    # Step 3: Solve the linear system
+    u_flat, info, residual_norm, solve_time = solve_system(A, b, rtol, atol)
+
+    # Map the 1D solution vector back to the 2D grid
+    for k_1d, (i, j) in enumerate(unknown_coords):
+        u[i, j] = u_flat[k_1d]
+
+    # Print solution statistics
+    print("\n--- Solution Statistics ---")
+    print(f"Minimum value of u: {np.min(u):.4f}")
+    print(f"Maximum value of u: {np.max(u):.4f}")
+    print("---------------------------")
+
+    # Step 4: Plot the solution
+    plot_solution(N, X, Y, u, circle_centers, radius, x_min, x_max, y_min, y_max)
+
+# Main execution block
+if __name__ == "__main__":
+    # Set grid resolution. N=120 means 121x121 grid points.
+    # Higher N leads to more accurate results but longer computation times.
+    # Set solver tolerances.
+    main_solver(N=120, rtol=1e-6, atol=1e-8)
+
+```
+****************************************

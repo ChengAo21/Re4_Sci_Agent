@@ -1,0 +1,167 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Technical explanation:
+# We solve the 1D Euler equations using a Finite Volume Method (FVM) with the HLLC approximate Riemann solver.
+# The Euler equations are hyperbolic conservation laws describing compressible flow.
+# The HLLC solver captures shock waves, contact discontinuities, and rarefactions robustly and accurately.
+# The domain [0,1] is discretized into cells; conserved variables are updated by flux differences at interfaces.
+# Time step is controlled by the CFL condition based on maximum wave speeds.
+# Boundary conditions are transmissive (zero-gradient) to simulate an open domain.
+# After evolving to t=0.2, primitive variables (density, velocity, pressure) are recovered and plotted.
+
+# Constants and parameters
+gamma = 1.4  # Ratio of specific heats
+nx = 400     # Number of spatial cells
+x_start, x_end = 0.0, 1.0
+CFL = 0.6    # CFL number for stability
+t_final = 0.2
+
+# Discretize spatial domain
+dx = (x_end - x_start) / nx
+x = np.linspace(x_start + 0.5*dx, x_end - 0.5*dx, nx)  # cell centers
+
+# Initialize primitive variables: density (rho), velocity (u), pressure (p)
+rho = np.where(x <= 0.5, 1.0, 0.125)
+u = np.zeros_like(x)
+p = np.where(x <= 0.5, 1.0, 0.1)
+
+# Compute total energy per unit volume: E = p/(gamma-1) + 0.5*rho*u^2
+E = p/(gamma - 1) + 0.5 * rho * u**2
+
+# Conserved variables vector U = [rho, rho*u, rho*E]
+U = np.zeros((3, nx))
+U[0, :] = rho
+U[1, :] = rho * u
+U[2, :] = rho * E
+
+def primitive_to_conserved(rho, u, p):
+    E = p/(gamma - 1) + 0.5 * rho * u**2
+    return np.array([rho, rho*u, rho*E])
+
+def conserved_to_primitive(U):
+    rho = U[0]
+    u = U[1]/rho
+    E = U[2]/rho
+    p = (gamma - 1) * rho * (E - 0.5 * u**2)
+    return rho, u, p
+
+def flux(U):
+    # Compute flux vector F(U) for Euler equations
+    rho, u, p = conserved_to_primitive(U)
+    F = np.zeros_like(U)
+    F[0] = rho * u
+    F[1] = rho * u**2 + p
+    F[2] = u * (U[2] + p)
+    return F
+
+def sound_speed(p, rho):
+    return np.sqrt(gamma * p / rho)
+
+def HLLC_flux(UL, UR):
+    # Compute HLLC flux at interface between left state UL and right state UR
+    # UL, UR shape: (3,) conserved variables
+    
+    # Left primitive variables
+    rhoL, uL, pL = conserved_to_primitive(UL)
+    aL = sound_speed(pL, rhoL)
+    HL = (UL[2] + pL) / rhoL  # total enthalpy
+    
+    # Right primitive variables
+    rhoR, uR, pR = conserved_to_primitive(UR)
+    aR = sound_speed(pR, rhoR)
+    HR = (UR[2] + pR) / rhoR
+    
+    # Estimate wave speeds SL, SR using Davis' estimates
+    SL = min(uL - aL, uR - aR)
+    SR = max(uL + aL, uR + aR)
+    
+    # Compute contact wave speed S_star
+    numerator = pR - pL + rhoL * uL * (SL - uL) - rhoR * uR * (SR - uR)
+    denominator = rhoL * (SL - uL) - rhoR * (SR - uR)
+    S_star = numerator / denominator
+    
+    # Compute fluxes for left and right states
+    FL = flux(UL)
+    FR = flux(UR)
+    
+    # Compute star region states
+    def U_star(U, S, S_star):
+        rho, u, p = conserved_to_primitive(U)
+        factor = rho * (S - u) / (S - S_star)
+        U_star = np.zeros(3)
+        U_star[0] = factor
+        U_star[1] = factor * S_star
+        E = U[2]/rho
+        U_star[2] = factor * (E + (S_star - u) * (S_star + p/(rho*(S - u))))
+        return U_star
+    
+    if 0 <= SL:
+        return FL
+    elif SL <= 0 <= S_star:
+        U_starL = U_star(UL, SL, S_star)
+        return FL + SL * (U_starL - UL)
+    elif S_star <= 0 <= SR:
+        U_starR = U_star(UR, SR, S_star)
+        return FR + SR * (U_starR - UR)
+    else:
+        return FR
+
+def apply_boundary_conditions(U):
+    # Transmissive (zero-gradient) boundary conditions
+    # Extend U by one ghost cell on each side
+    U_ext = np.zeros((3, nx + 2))
+    U_ext[:, 1:-1] = U
+    U_ext[:, 0] = U[:, 0]      # left ghost cell copies first cell
+    U_ext[:, -1] = U[:, -1]    # right ghost cell copies last cell
+    return U_ext
+
+# Time integration loop
+t = 0.0
+U_curr = U.copy()
+
+while t < t_final:
+    # Apply boundary conditions
+    U_ext = apply_boundary_conditions(U_curr)
+    
+    # Compute fluxes at interfaces
+    F_half = np.zeros((3, nx + 1))
+    for i in range(nx + 1):
+        UL = U_ext[:, i]
+        UR = U_ext[:, i+1]
+        F_half[:, i] = HLLC_flux(UL, UR)
+    
+    # Compute maximum wave speed for CFL condition
+    rho, u, p = conserved_to_primitive(U_curr)
+    a = sound_speed(p, rho)
+    max_speed = np.max(np.abs(u) + a)
+    dt = CFL * dx / max_speed
+    if t + dt > t_final:
+        dt = t_final - t
+    
+    # Update conserved variables using finite volume update
+    U_next = U_curr - dt/dx * (F_half[:, 1:] - F_half[:, :-1])
+    
+    # Update time and solution
+    t += dt
+    U_curr = U_next
+
+# Recover primitive variables at final time
+rho, u, p = conserved_to_primitive(U_curr)
+
+# Plot results: density, velocity, pressure
+plt.figure(figsize=(10, 6))
+plt.plot(x, rho, label=r'Density $\rho$')
+plt.plot(x, u, label=r'Velocity $u$')
+plt.plot(x, p, label=r'Pressure $p$')
+plt.xlabel('x')
+plt.title(f'Sod Shock Tube Solution at t = {t_final}')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+```
+****************************************

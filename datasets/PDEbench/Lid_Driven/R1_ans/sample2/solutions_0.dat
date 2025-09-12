@@ -1,0 +1,181 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+# Parameters
+Re = 100.0       # Reynolds number
+alpha = 2.0      # Lid velocity parameter
+Nx = 101         # Number of grid points in x-direction
+Ny = 101         # Number of grid points in y-direction
+beta = 1.0       # Artificial compressibility parameter
+tol = 1e-5       # Convergence tolerance
+max_iter = 20000 # Maximum iterations
+dt = 0.001       # Pseudo-time step
+
+# Grid setup
+x = np.linspace(0, 1, Nx)
+y = np.linspace(0, 1, Ny)
+dx = x[1] - x[0]
+dy = y[1] - y[0]
+X, Y = np.meshgrid(x, y, indexing='ij')  # Grid matrices
+
+# Initialize flow variables
+u = np.zeros((Nx, Ny))     # x-velocity
+v = np.zeros((Nx, Ny))     # y-velocity
+p = np.zeros((Nx, Ny))     # Pressure
+
+# Apply boundary conditions for velocity
+## Top boundary (y=1): parabolic profile
+u[:, -1] = alpha * x * (1 - x)  # u = αx(1-x)
+v[:, -1] = 0.0                  # v = 0
+
+## Other boundaries (Γ₂): no-slip
+# Left (x=0)
+u[0, :] = 0.0
+v[0, :] = 0.0
+# Right (x=1)
+u[-1, :] = 0.0
+v[-1, :] = 0.0
+# Bottom (y=0)
+u[:, 0] = 0.0
+v[:, 0] = 0.0
+
+# Precompute coefficients for efficiency
+inv_dx = 1.0 / (2 * dx)
+inv_dy = 1.0 / (2 * dy)
+inv_dx2 = 1.0 / (dx**2)
+inv_dy2 = 1.0 / (dy**2)
+nu = 1.0 / Re  # Kinematic viscosity
+
+# Main solver loop using Artificial Compressibility Method
+for iter in range(max_iter):
+    u_old = u.copy()
+    v_old = v.copy()
+    p_old = p.copy()
+    
+    # Update interior points (1 to Nx-2, 1 to Ny-2)
+    for i in range(1, Nx-1):
+        for j in range(1, Ny-1):
+            # Convective terms (upwind scheme)
+            ## u-component convection
+            conv_u_x = u[i,j] * (u_old[i+1,j] - u_old[i-1,j]) * inv_dx if u[i,j] > 0 else \
+                       u[i,j] * (u_old[i,j] - u_old[i-1,j]) / dx
+            conv_u_y = v[i,j] * (u_old[i,j+1] - u_old[i,j-1]) * inv_dy if v[i,j] > 0 else \
+                       v[i,j] * (u_old[i,j] - u_old[i,j-1]) / dy
+            conv_u = conv_u_x + conv_u_y
+            
+            ## v-component convection
+            conv_v_x = u[i,j] * (v_old[i+1,j] - v_old[i-1,j]) * inv_dx if u[i,j] > 0 else \
+                       u[i,j] * (v_old[i,j] - v_old[i-1,j]) / dx
+            conv_v_y = v[i,j] * (v_old[i,j+1] - v_old[i,j-1]) * inv_dy if v[i,j] > 0 else \
+                       v[i,j] * (v_old[i,j] - v_old[i,j-1]) / dy
+            conv_v = conv_v_x + conv_v_y
+            
+            # Diffusion terms (central difference)
+            diff_u = nu * (
+                (u_old[i+1,j] - 2*u_old[i,j] + u_old[i-1,j]) * inv_dx2 +
+                (u_old[i,j+1] - 2*u_old[i,j] + u_old[i,j-1]) * inv_dy2
+            )
+            diff_v = nu * (
+                (v_old[i+1,j] - 2*v_old[i,j] + v_old[i-1,j]) * inv_dx2 +
+                (v_old[i,j+1] - 2*v_old[i,j] + v_old[i,j-1]) * inv_dy2
+            )
+            
+            # Pressure gradients (central difference)
+            dpdx = (p_old[i+1,j] - p_old[i-1,j]) * inv_dx
+            dpdy = (p_old[i,j+1] - p_old[i,j-1]) * inv_dy
+            
+            # Update equations
+            u[i,j] = u_old[i,j] + dt * (-conv_u - dpdx + diff_u)
+            v[i,j] = v_old[i,j] + dt * (-conv_v - dpdy + diff_v)
+            div = (u_old[i+1,j] - u_old[i-1,j]) * inv_dx + (v_old[i,j+1] - v_old[i,j-1]) * inv_dy
+            p[i,j] = p_old[i,j] - dt * beta * div
+    
+    # Apply boundary conditions
+    ## Velocity boundaries (Dirichlet conditions)
+    u[:, -1] = alpha * x * (1 - x)  # Top boundary
+    v[:, -1] = 0.0
+    u[0, :] = 0.0; v[0, :] = 0.0   # Left boundary
+    u[-1, :] = 0.0; v[-1, :] = 0.0 # Right boundary
+    u[:, 0] = 0.0; v[:, 0] = 0.0   # Bottom boundary
+    
+    ## Pressure boundaries (Neumann conditions)
+    p[0, :] = p[1, :]      # Left: dp/dx=0
+    p[-1, :] = p[-2, :]    # Right: dp/dx=0
+    p[:, 0] = p[:, 1]      # Bottom: dp/dy=0
+    p[:, -1] = p[:, -2]    # Top: dp/dy=0
+    p[0, 0] = 0.0          # Reference pressure
+    
+    # Compute convergence
+    du = np.max(np.abs(u - u_old))
+    dv = np.max(np.abs(v - v_old))
+    dp_val = np.max(np.abs(p - p_old))
+    error = max(du, dv, dp_val)
+    
+    # Check convergence
+    if error < tol:
+        print(f"Converged after {iter+1} iterations with error {error:.2e}")
+        break
+else:
+    print(f"Reached max iterations ({max_iter}) with error {error:.2e}")
+
+# Post-processing: Compute velocity magnitude
+vel_mag = np.sqrt(u**2 + v**2)
+
+# Create plot with contour and streamlines
+fig, ax = plt.subplots(figsize=(10, 8))
+
+# Velocity magnitude contour
+contour = ax.contourf(X, Y, vel_mag, levels=50, cmap='jet')
+ax.set_title(f'Velocity Magnitude Contours (Re={Re})')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+
+# Add streamlines
+ax.streamplot(X, Y, u, v, color='black', density=1.5, linewidth=0.7, arrowsize=1.2)
+
+# Add colorbar
+divider = make_axes_locatable(ax)
+cax = divider.append_axes("right", size="5%", pad=0.1)
+fig.colorbar(contour, cax=cax, label='Velocity Magnitude')
+
+# Save figure
+plt.tight_layout()
+plt.savefig('navier_stokes_solution.png', dpi=300, bbox_inches='tight')
+```
+
+### Technical Explanation
+
+The Artificial Compressibility Method (ACM) solves steady incompressible Navier-Stokes equations by:
+1. Introducing a pseudo-time derivative in the continuity equation: $\frac{\partial p}{\partial \tau} + \beta\nabla\cdot\mathbf{u} = 0$
+2. Using explicit time-marching to reach steady state
+3. Employing upwind differencing for convective terms to enhance stability
+4. Applying central differencing for diffusion and pressure terms
+
+### Boundary Condition Implementation
+- **Velocity**: Direct assignment of Dirichlet conditions
+  - Top boundary: Parabolic profile $u=2x(1-x)$, $v=0$
+  - Other boundaries: $u=v=0$
+- **Pressure**: Neumann conditions via ghost-point approximation
+  - $\partial p/\partial n=0$ implemented by copying adjacent interior values
+  - Reference pressure: $p(0,0)=0$ explicitly enforced
+
+### Convergence Monitoring
+- Tracks maximum changes in $u$, $v$, and $p$ between iterations
+- Stops when changes fall below tolerance ($10^{-5}$) or reaches maximum iterations
+
+### Visualization
+- Velocity magnitude contours using 'jet' colormap
+- Superimposed streamlines showing flow patterns
+- Automatic colorbar scaling with professional layout
+- High-resolution output (300 DPI) saved as PNG
+
+The solution captures key flow features including:
+- Primary vortex formation
+- Boundary layer development
+- Recirculation zones
+- Lid-driven flow characteristics
+****************************************

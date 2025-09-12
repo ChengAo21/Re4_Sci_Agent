@@ -1,0 +1,168 @@
+
+****************************************
+I'll implement the Finite Difference Method (FDM) on a masked Cartesian grid to solve this Poisson-Boltzmann equation. The solution involves discretizing the domain, handling complex boundaries, solving the linear system, and visualizing results.
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.sparse import lil_matrix, csc_matrix
+from scipy.sparse.linalg import spsolve
+
+# ==============================================================================
+# Problem Parameters and Domain Setup
+# ==============================================================================
+# Define physical parameters
+mu1, mu2, k, A = 1, 4, 8, 10
+
+# Create computational grid (81x81 points)
+n = 81
+h = 2.0 / (n - 1)
+x = np.linspace(-1, 1, n)
+y = np.linspace(-1, 1, n)
+X, Y = np.meshgrid(x, y, indexing='ij')
+
+# Define source function f(x,y)
+f = A * ((mu1**2 + X**2) + (mu2**2 + Y**2)) * \
+    np.sin(mu1 * np.pi * X) * np.sin(mu2 * np.pi * Y)
+
+# Define circular holes (center_x, center_y, radius)
+circles = [
+    (0.5, 0.5, 0.2),
+    (0.4, -0.4, 0.4),
+    (-0.2, -0.7, 0.1),
+    (-0.6, 0.5, 0.3)
+]
+
+# ==============================================================================
+# Domain Masking and Boundary Conditions
+# ==============================================================================
+# Create hole mask (True inside holes)
+hole_mask = np.zeros((n, n), dtype=bool)
+for cx, cy, r in circles:
+    hole_mask |= (X - cx)**2 + (Y - cy)**2 <= r**2
+
+# Create fixed boundary mask
+fixed_mask = np.zeros((n, n), dtype=bool)
+fixed_mask[0, :] = True       # Left boundary
+fixed_mask[-1, :] = True      # Right boundary
+fixed_mask[:, 0] = True       # Bottom boundary
+fixed_mask[:, -1] = True      # Top boundary
+fixed_mask[hole_mask] = True  # Hole boundaries
+
+# Initialize solution with boundary conditions
+u = np.zeros((n, n))
+u[fixed_mask] = np.where(hole_mask[fixed_mask], 1.0, 0.2)
+
+# ==============================================================================
+# Linear System Assembly
+# ==============================================================================
+# Map interior points to 1D indices
+interior_points = np.where(~fixed_mask)
+num_interior = len(interior_points[0])
+index_map = np.full((n, n), -1, dtype=int)
+index_map[interior_points] = np.arange(num_interior)
+
+# Initialize sparse matrix and RHS vector
+A = lil_matrix((num_interior, num_interior))
+b = np.zeros(num_interior)
+h2 = h * h
+center_coeff = 4/h2 + k*k
+
+# Build discrete equations for interior points
+for idx, (i, j) in enumerate(zip(*interior_points)):
+    # Center point coefficient
+    A[idx, idx] = center_coeff
+    
+    # Right-hand side starts with source term
+    b[idx] = f[i, j]
+    
+    # Process neighbors (left, right, bottom, top)
+    for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        ni, nj = i + di, j + dj
+        if 0 <= ni < n and 0 <= nj < n:
+            if fixed_mask[ni, nj]:
+                # Fixed boundary: add to RHS
+                b[idx] += u[ni, nj] / h2
+            else:
+                # Interior point: add to matrix
+                col_idx = index_map[ni, nj]
+                A[idx, col_idx] = -1/h2
+
+# ==============================================================================
+# Solve Linear System and Reconstruct Solution
+# ==============================================================================
+# Convert to CSC format and solve
+A_csc = A.tocsc()
+u_interior = spsolve(A_csc, b)
+u[interior_points] = u_interior
+
+# ==============================================================================
+# Visualization and Output
+# ==============================================================================
+# Create figure with contour plot
+plt.figure(figsize=(10, 8))
+contour = plt.contourf(X, Y, u, levels=50, cmap='viridis')
+plt.colorbar(contour, label='Solution u')
+
+# Draw circular boundaries
+for cx, cy, r in circles:
+    circle = plt.Circle((cx, cy), r, color='red', fill=False, linewidth=2)
+    plt.gca().add_patch(circle)
+
+# Configure plot appearance
+plt.title('Solution of Poisson-Boltzmann Equation', fontsize=14)
+plt.xlabel('x', fontsize=12)
+plt.ylabel('y', fontsize=12)
+plt.axis('equal')
+plt.xlim(-1, 1)
+plt.ylim(-1, 1)
+plt.grid(alpha=0.3)
+
+# Save figure without displaying
+plt.savefig('poisson_boltzmann_solution.png', dpi=300, bbox_inches='tight')
+
+# Print key metrics
+print("="*70)
+print("Poisson-Boltzmann Equation Solution Summary")
+print("="*70)
+print(f"Grid size: {n}x{n} points | Spacing: h = {h:.4f}")
+print(f"Interior points: {num_interior} | Fixed points: {np.sum(fixed_mask)}")
+print(f"Solution range: min = {u.min():.6f}, max = {u.max():.6f}")
+print("="*70)
+```
+
+### Technical Explanation:
+
+1. **Problem Discretization**:
+- The 2D domain [-1,1]×[-1,1] is discretized using a 81×81 uniform grid
+- The Helmholtz operator is approximated via 5-point finite difference stencil:
+  """math
+  -\Delta u + k^2 u \approx \frac{-u_{i-1,j} - u_{i+1,j} - u_{i,j-1} - u_{i,j+1} + 4u_{i,j}}{h^2} + k^2 u_{i,j}
+  """
+
+2. **Boundary Handling**:
+- Outer boundaries (square edges) set to u=0.2
+- Inner boundaries (circular holes) set to u=1.0
+- Hole regions are identified via geometric masking:
+  """python
+  hole_mask |= (X - cx)**2 + (Y - cy)**2 <= r**2
+  """
+
+3. **Sparse System Assembly**:
+- Only interior points contribute to the linear system
+- Boundary values are incorporated into the RHS vector
+- Matrix coefficients follow the discretization scheme:
+  - Diagonal: $4/h^2 + k^2$
+  - Off-diagonal: $-1/h^2$ for neighboring points
+
+4. **Numerical Solution**:
+- Sparse direct solver (spsolve) handles the symmetric system
+- Solution reconstructed by combining interior values with boundary conditions
+
+5. **Visualization**:
+- Contour plot shows solution field
+- Red circles mark hole boundaries
+- High-resolution output (300 DPI) ensures clarity
+
+The implementation efficiently handles the complex domain using masking techniques while maintaining numerical accuracy through proper discretization of the Helmholtz operator.
+****************************************

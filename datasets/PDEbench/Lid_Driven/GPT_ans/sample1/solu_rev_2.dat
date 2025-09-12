@@ -1,0 +1,240 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import RectBivariateSpline
+
+# Technical explanation:
+# This code solves the 2D steady incompressible Navier-Stokes equations for the lid-driven cavity problem
+# using the Artificial Compressibility Method (ACM).
+# ACM introduces a pseudo-time derivative of pressure, converting the steady incompressible system into a
+# pseudo-transient system:
+#   ∂u/∂τ + u∂u/∂x + v∂u/∂y + ∂p/∂x - (1/Re)∇²u = 0
+#   ∂v/∂τ + u∂v/∂x + v∂v/∂y + ∂p/∂y - (1/Re)∇²v = 0
+#   ∂p/∂τ + β(∂u/∂x + ∂v/∂y) = 0
+# We march in pseudo-time τ until steady state (∂/∂τ → 0) is reached.
+# Spatial derivatives are discretized with second-order central differences on a uniform grid.
+# Boundary conditions:
+#   - Top boundary (lid): u = α x(1-x), v=0
+#   - Other boundaries: u=v=0 (no-slip)
+#   - Pressure reference: p(0,0)=0
+#   - Zero normal pressure gradient on boundaries (Neumann BC for p)
+# The code uses explicit Euler time stepping with a small pseudo-time step for stability.
+# Convergence is monitored by the maximum absolute update in u, v, and p.
+
+# Parameters
+Re = 100.0          # Reynolds number
+alpha = 2.0         # Lid velocity coefficient
+beta = 1.0          # Artificial compressibility parameter
+Lx, Ly = 1.0, 1.0   # Domain size
+nx, ny = 81, 81     # Number of grid points in x and y
+dx = Lx / (nx - 1)
+dy = Ly / (ny - 1)
+dtau = 0.001        # Pseudo-time step size (small for stability)
+max_iter = 50000    # Maximum pseudo-time iterations
+tol = 1e-6          # Convergence tolerance for max update
+
+# Create grid
+x = np.linspace(0, Lx, nx)
+y = np.linspace(0, Ly, ny)
+X, Y = np.meshgrid(x, y, indexing='ij')
+
+# Initialize fields: u, v, p
+u = np.zeros((nx, ny))
+v = np.zeros((nx, ny))
+p = np.zeros((nx, ny))
+
+# Helper functions for derivatives using central differences with Neumann BC approximations
+
+def ddx(f):
+    # ∂f/∂x with central differences, forward/backward difference at boundaries (Neumann BC)
+    dfdx = np.zeros_like(f)
+    dfdx[1:-1, :] = (f[2:, :] - f[:-2, :]) / (2*dx)
+    dfdx[0, :] = (f[1, :] - f[0, :]) / dx
+    dfdx[-1, :] = (f[-1, :] - f[-2, :]) / dx
+    return dfdx
+
+def ddy(f):
+    # ∂f/∂y with central differences, forward/backward difference at boundaries (Neumann BC)
+    dfdy = np.zeros_like(f)
+    dfdy[:, 1:-1] = (f[:, 2:] - f[:, :-2]) / (2*dy)
+    dfdy[:, 0] = (f[:, 1] - f[:, 0]) / dy
+    dfdy[:, -1] = (f[:, -1] - f[:, -2]) / dy
+    return dfdy
+
+def laplacian(f):
+    # ∇²f with second-order central differences, approximated at boundaries with one-sided differences
+    lap = np.zeros_like(f)
+    lap[1:-1,1:-1] = (
+        (f[2:,1:-1] - 2*f[1:-1,1:-1] + f[:-2,1:-1]) / dx**2 +
+        (f[1:-1,2:] - 2*f[1:-1,1:-1] + f[1:-1,:-2]) / dy**2
+    )
+    # Left and right boundaries
+    lap[0,1:-1] = (
+        (f[1,1:-1] - 2*f[0,1:-1] + f[0,1:-1]) / dx**2 +
+        (f[0,2:] - 2*f[0,1:-1] + f[0,:-2]) / dy**2
+    )
+    lap[-1,1:-1] = (
+        (f[-1,1:-1] - 2*f[-1,1:-1] + f[-2,1:-1]) / dx**2 +
+        (f[-1,2:] - 2*f[-1,1:-1] + f[-1,:-2]) / dy**2
+    )
+    # Bottom and top boundaries
+    lap[1:-1,0] = (
+        (f[2:,0] - 2*f[1:-1,0] + f[:-2,0]) / dx**2 +
+        (f[1:-1,1] - 2*f[1:-1,0] + f[1:-1,0]) / dy**2
+    )
+    lap[1:-1,-1] = (
+        (f[2:,-1] - 2*f[1:-1,-1] + f[:-2,-1]) / dx**2 +
+        (f[1:-1,-1] - 2*f[1:-1,-1] + f[1:-1,-2]) / dy**2
+    )
+    # Corners
+    lap[0,0] = (
+        (f[1,0] - 2*f[0,0] + f[0,0]) / dx**2 +
+        (f[0,1] - 2*f[0,0] + f[0,0]) / dy**2
+    )
+    lap[0,-1] = (
+        (f[1,-1] - 2*f[0,-1] + f[0,-1]) / dx**2 +
+        (f[0,-1] - 2*f[0,-1] + f[0,-2]) / dy**2
+    )
+    lap[-1,0] = (
+        (f[-1,0] - 2*f[-1,0] + f[-2,0]) / dx**2 +
+        (f[-1,1] - 2*f[-1,0] + f[-1,0]) / dy**2
+    )
+    lap[-1,-1] = (
+        (f[-1,-1] - 2*f[-1,-1] + f[-2,-1]) / dx**2 +
+        (f[-1,-1] - 2*f[-1,-1] + f[-1,-2]) / dy**2
+    )
+    return lap
+
+def apply_velocity_bc(u, v):
+    # Apply velocity boundary conditions:
+    # Top boundary (y=Ly): u = alpha * x*(1-x), v=0
+    u[:, -1] = alpha * x * (1 - x)
+    v[:, -1] = 0.0
+    # Left, right, bottom boundaries: u=v=0 (no-slip)
+    u[0, :] = 0.0
+    v[0, :] = 0.0
+    u[-1, :] = 0.0
+    v[-1, :] = 0.0
+    u[:, 0] = 0.0
+    v[:, 0] = 0.0
+
+def apply_pressure_bc(p):
+    # Apply pressure boundary conditions:
+    # Zero normal pressure gradient on all boundaries (Neumann BC)
+    p[0, :] = p[1, :]       # Left boundary
+    p[-1, :] = p[-2, :]     # Right boundary
+    p[:, 0] = p[:, 1]       # Bottom boundary
+    p[:, -1] = p[:, -2]     # Top boundary
+    # Reference pressure at (0,0) = 0 to fix pressure level
+    p[0, 0] = 0.0
+
+# Main iteration loop with convergence monitoring
+print("Starting Artificial Compressibility Method iterations...")
+
+for it in range(max_iter):
+    u_old = u.copy()
+    v_old = v.copy()
+    p_old = p.copy()
+
+    # Compute spatial derivatives
+    dudx = ddx(u)
+    dudy = ddy(u)
+    dvdx = ddx(v)
+    dvdy = ddy(v)
+    dpdx = ddx(p)
+    dpdy = ddy(p)
+    div_u = dudx + dvdy
+    lap_u = laplacian(u)
+    lap_v = laplacian(v)
+
+    # Nonlinear convective terms (central difference)
+    conv_u = u * dudx + v * dudy
+    conv_v = u * dvdx + v * dvdy
+
+    # Update velocity fields (explicit Euler in pseudo-time)
+    u = u - dtau * (conv_u + dpdx - (1.0 / Re) * lap_u)
+    v = v - dtau * (conv_v + dpdy - (1.0 / Re) * lap_v)
+
+    # Update pressure field
+    p = p - dtau * beta * div_u
+
+    # Apply boundary conditions
+    apply_velocity_bc(u, v)
+    apply_pressure_bc(p)
+
+    # Compute max update for convergence check
+    max_u_diff = np.max(np.abs(u - u_old))
+    max_v_diff = np.max(np.abs(v - v_old))
+    max_p_diff = np.max(np.abs(p - p_old))
+    max_diff = max(max_u_diff, max_v_diff, max_p_diff)
+
+    # Print iteration info every 1000 steps and first iteration
+    if (it + 1) % 1000 == 0 or it == 0:
+        print(f"Iteration {it + 1:5d}: max update = {max_diff:.3e}")
+
+    if max_diff < tol:
+        print(f"Converged after {it + 1} iterations with max update = {max_diff:.3e}")
+        break
+else:
+    print(f"Reached maximum iterations ({max_iter}) without full convergence.")
+
+# Compute velocity magnitude
+vel_mag = np.sqrt(u**2 + v**2)
+
+# Plotting results: velocity magnitude contours and streamlines
+fig, ax = plt.subplots(figsize=(8, 6))
+
+# Contour plot of velocity magnitude with jet colormap
+contf = ax.contourf(X, Y, vel_mag, levels=50, cmap='jet')
+cbar = fig.colorbar(contf, ax=ax)
+cbar.set_label('Velocity magnitude')
+
+# Streamlines plot on a finer grid for smoothness
+nx_plot, ny_plot = 100, 100
+x_plot = np.linspace(0, Lx, nx_plot)
+y_plot = np.linspace(0, Ly, ny_plot)
+X_plot, Y_plot = np.meshgrid(x_plot, y_plot, indexing='ij')
+
+# Interpolate u,v onto plotting grid using RectBivariateSpline
+interp_u = RectBivariateSpline(x, y, u)
+interp_v = RectBivariateSpline(x, y, v)
+u_plot = interp_u(x_plot, y_plot)
+v_plot = interp_v(x_plot, y_plot)
+
+# Streamplot with black lines, density and linewidth adjusted for clarity
+ax.streamplot(x_plot, y_plot, u_plot.T, v_plot.T, color='k', density=2, linewidth=0.7)
+
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_title('Velocity magnitude contours and streamlines (ACM solution)')
+ax.set_aspect('equal')
+
+plt.tight_layout()
+plt.savefig('velocity_streamlines_acm.png', dpi=300)
+# plt.show()  # Not used as per instructions
+
+# Detailed result printing at selected points
+print("\nDetailed results at selected points:")
+points = [(0.5, 1.0), (0.5, 0.5), (0.25, 0.75), (0.75, 0.25), (0.0, 0.0)]
+for (xp, yp) in points:
+    # Compute nearest indices carefully to avoid out-of-bounds
+    i = min(int(round(xp / dx)), nx - 1)
+    j = min(int(round(yp / dy)), ny - 1)
+    print(f"At (x={xp:.2f}, y={yp:.2f}): u = {u[i,j]:.5f}, v = {v[i,j]:.5f}, p = {p[i,j]:.5f}, |velocity| = {vel_mag[i,j]:.5f}")
+
+print("\nArtificial Compressibility Method solution completed and figure saved as 'velocity_streamlines_acm.png'.")
+
+# --- Code optimizations and improvements incorporated ---
+# 1. Maintained modular functions for derivatives and boundary conditions for clarity and reusability.
+# 2. Used vectorized numpy operations for efficient computation.
+# 3. Carefully applied Neumann BCs for pressure and velocity derivatives to ensure physical consistency.
+# 4. Fixed pressure at (0,0) to remove arbitrary constant in pressure field.
+# 5. Used RectBivariateSpline interpolation for smooth streamlines on a finer grid.
+# 6. Added detailed convergence printouts and final detailed results at selected points.
+# 7. Ensured consistent indexing with meshgrid indexing='ij' to avoid dimension mismatches.
+# 8. Used explicit Euler with small dtau for stability, acknowledging that implicit schemes could accelerate convergence.
+# 9. Saved figure with jet colormap as requested, without plt.show().
+```
+****************************************

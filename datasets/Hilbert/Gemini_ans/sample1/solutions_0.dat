@@ -1,0 +1,440 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Technical explanation for the solving algorithm:
+# This script implements several numerical methods from scratch to solve the linear system H_n x = b,
+# where H_n is the n x n Hilbert matrix (h_ij = 1/(i+j-1)) and b is constructed such that the exact
+# solution x is a vector of ones. The Hilbert matrix is notoriously ill-conditioned, meaning its
+# condition number grows rapidly with n, making accurate solutions challenging due to floating-point
+# arithmetic limitations.
+#
+# The implemented methods are:
+# 1. LU Decomposition with Partial Pivoting: A direct method that factorizes A into P L U, where P is a
+#    permutation matrix, L is lower triangular with unit diagonal, and U is upper triangular. Partial
+#    pivoting is crucial for numerical stability by selecting the largest pivot element in each column
+#    to minimize error propagation. The system is solved by forward substitution (Ly = Pb) and backward
+#    substitution (Ux = y).
+# 2. Cholesky Decomposition: Applicable because the Hilbert matrix is symmetric positive definite (SPD).
+#    It factorizes A into L L^T, where L is a lower triangular matrix. This method is generally more
+#    numerically stable and efficient for SPD matrices than general LU decomposition. The system is
+#    solved by forward substitution (Ly = b) and backward substitution (L^T x = y).
+# 3. QR Decomposition via Householder Reflections: A direct method that factorizes A into Q R, where Q
+#    is an orthogonal matrix and R is an upper triangular matrix. Householder reflections are used to
+#    construct Q, ensuring high numerical stability by preserving Euclidean norms. The system is solved
+#    by transforming b to Q^T b and then backward substitution (Rx = Q^T b).
+# 4. Conjugate Gradient (CG) Method with Jacobi Preconditioner: An iterative method suitable for SPD
+#    systems. It minimizes the quadratic form associated with the linear system. A Jacobi preconditioner
+#    (diagonal scaling) is used to improve the condition number of the system, thereby accelerating
+#    convergence, especially for ill-conditioned problems. The iteration stops when the residual norm
+#    falls below a specified tolerance.
+# 5. Tikhonov Regularization: A technique to stabilize the solution of ill-conditioned systems. It
+#    transforms the original system H_n x = b into a regularized normal equation (H_n^T H_n + lambda I)x = H_n^T b.
+#    The addition of a small positive lambda * I (regularization parameter times identity matrix) makes
+#    the new system matrix better conditioned. This regularized system is then solved using Cholesky
+#    decomposition, as (H_n^T H_n + lambda I) is symmetric positive definite.
+
+# Helper functions
+def generate_hilbert_matrix(n):
+    # Generates an n x n Hilbert matrix.
+    # h_ij = 1 / (i + j - 1) for 1-indexed i,j. For 0-indexed i,j it's 1 / (i + j + 1).
+    H = np.zeros((n, n), dtype=np.float64)
+    for i in range(n):
+        for j in range(n):
+            H[i, j] = 1.0 / (i + j + 1.0)
+    return H
+
+def generate_b_vector(H_n):
+    # Generates the right-hand side vector b such that the exact solution x is a vector of ones.
+    # b = H_n * x_exact, where x_exact = (1, 1, ..., 1)^T
+    n = H_n.shape[0]
+    x_exact = np.ones(n, dtype=np.float64)
+    b = np.dot(H_n, x_exact)
+    return b, x_exact
+
+def calculate_l_infinity_error(computed_x, exact_x):
+    # Calculates the L-infinity norm (maximum absolute difference) between two vectors.
+    return np.max(np.abs(computed_x - exact_x))
+
+# 1. LU Decomposition with Partial Pivoting (from scratch)
+def lu_factor_pivot(A):
+    # Performs LU factorization with partial pivoting on matrix A.
+    # Returns (LU, P) where LU contains L and U factors, and P is the permutation vector.
+    n = A.shape[0]
+    LU = A.copy()
+    P = np.arange(n) # Permutation vector, initially identity
+
+    for k in range(n - 1):
+        # Find pivot row: row with the largest absolute value in the current column (from k downwards)
+        pivot_row_relative = np.argmax(np.abs(LU[k:, k]))
+        pivot_row_absolute = k + pivot_row_relative
+        
+        # Swap rows in LU matrix and permutation vector if necessary
+        if pivot_row_absolute != k:
+            LU[[k, pivot_row_absolute], :] = LU[[pivot_row_absolute, k], :]
+            P[[k, pivot_row_absolute]] = P[[pivot_row_absolute, k]]
+        
+        # Check for zero pivot after potential swap
+        if LU[k, k] == 0:
+            raise ValueError(f"Matrix is singular or numerically singular at pivot {k}.")
+        
+        # Compute multipliers and perform elimination
+        multipliers = LU[k+1:, k] / LU[k, k]
+        LU[k+1:, k] = multipliers # Store multipliers in the lower triangular part (L)
+        LU[k+1:, k+1:] -= np.outer(multipliers, LU[k, k+1:]) # Update the trailing submatrix
+            
+    return LU, P
+
+def lu_solve_pivot(LU, P, b):
+    # Solves the linear system Ax = b using LU factors (LU, P) obtained from lu_factor_pivot.
+    # A is implicitly P^T L U.
+    n = LU.shape[0]
+    
+    # Apply permutation to b: Pb
+    b_perm = b[P]
+    
+    # Forward substitution: Ly = Pb
+    # L is implicitly stored in LU (unit diagonal, multipliers below diagonal)
+    y = np.zeros(n, dtype=np.float64)
+    for i in range(n):
+        y[i] = b_perm[i] - np.dot(LU[i, :i], y[:i]) # LU[i, :i] contains L_i,j for j < i
+    
+    # Backward substitution: Ux = y
+    # U is implicitly stored in LU (upper triangular part)
+    x = np.zeros(n, dtype=np.float64)
+    for i in range(n - 1, -1, -1):
+        if LU[i, i] == 0:
+            raise ValueError(f"U matrix has a zero diagonal element at {i}, cannot solve.")
+        x[i] = (y[i] - np.dot(LU[i, i+1:], x[i+1:])) / LU[i, i] # LU[i, i+1:] contains U_i,j for j > i
+        
+    return x
+
+# 2. Cholesky Decomposition (from scratch)
+def cholesky_factor(A):
+    # Performs Cholesky factorization on a symmetric positive definite matrix A.
+    # Returns L such that A = L L^T.
+    n = A.shape[0]
+    L = np.zeros((n, n), dtype=np.float64)
+
+    for j in range(n):
+        # Calculate diagonal element L[j, j]
+        # L[j,j]^2 = A[j,j] - sum(L[j,k]^2 for k=0 to j-1)
+        sum_k_sq = np.dot(L[j, :j], L[j, :j])
+        val = A[j, j] - sum_k_sq
+        if val <= 0: # Check for positive definiteness (or numerical issues)
+            raise ValueError(f"Matrix is not positive definite or numerically not positive definite at column {j}.")
+        L[j, j] = np.sqrt(val)
+
+        # Calculate off-diagonal elements L[i, j] for i > j
+        # L[i,j] = (A[i,j] - sum(L[i,k]*L[j,k] for k=0 to j-1)) / L[j,j]
+        for i in range(j + 1, n):
+            sum_k_prod = np.dot(L[i, :j], L[j, :j])
+            L[i, j] = (A[i, j] - sum_k_prod) / L[j, j]
+            
+    return L
+
+def cholesky_solve(L, b):
+    # Solves the linear system Ax = b using Cholesky factor L (A = L L^T).
+    n = L.shape[0]
+    
+    # Forward substitution: Ly = b
+    y = np.zeros(n, dtype=np.float64)
+    for i in range(n):
+        if L[i, i] == 0:
+            raise ValueError(f"L matrix has a zero diagonal element at {i}, cannot solve.")
+        y[i] = (b[i] - np.dot(L[i, :i], y[:i])) / L[i, i]
+        
+    # Backward substitution: L^T x = y
+    x = np.zeros(n, dtype=np.float64)
+    LT = L.T # Transpose of L
+    for i in range(n - 1, -1, -1):
+        if LT[i, i] == 0:
+            raise ValueError(f"L^T matrix has a zero diagonal element at {i}, cannot solve.")
+        x[i] = (y[i] - np.dot(LT[i, i+1:], x[i+1:])) / LT[i, i]
+        
+    return x
+
+# 3. QR Decomposition via Householder Reflections (from scratch)
+def qr_factor_householder(A):
+    # Performs QR factorization of matrix A using Householder reflections.
+    # Returns (R, householder_vectors, betas) where R is the upper triangular matrix,
+    # and householder_vectors/betas implicitly define Q.
+    n, m = A.shape
+    R = A.copy()
+    householder_vectors = [] # Stores v for each reflection
+    betas = [] # Stores beta for each reflection (2 / ||v||^2)
+
+    for k in range(min(n, m)):
+        # Extract the column vector to be zeroed out below the diagonal
+        x = R[k:, k]
+        
+        # Compute Householder vector v
+        # alpha = -sign(x_0) * ||x||_2
+        alpha = -np.copysign(np.linalg.norm(x), x[0])
+        v = x.copy()
+        v[0] = v[0] - alpha # v = x - alpha * e_1
+        
+        # Compute beta (2 / ||v||^2)
+        norm_v_sq = np.dot(v, v)
+        if norm_v_sq == 0: # Avoid division by zero if x is already zero (e.g., column is already zeroed)
+            beta = 0.0
+        else:
+            beta = 2.0 / norm_v_sq
+        
+        householder_vectors.append(v)
+        betas.append(beta)
+        
+        # Apply Householder reflection to the rest of the matrix R
+        # P = I - beta * v v^T
+        # R_new = P R_old
+        # R_new[k:, k:] = R_old[k:, k:] - beta * v (v^T R_old[k:, k:])
+        R[k:, k:] -= beta * np.outer(v, np.dot(v.T, R[k:, k:]))
+        
+        # Set elements below diagonal to zero for numerical cleanup (they should be zero theoretically)
+        if k < n - 1:
+            R[k+1:, k] = 0.0
+            
+    return R, householder_vectors, betas
+
+def qr_solve_householder(A, b):
+    # Solves Ax = b using QR factorization via Householder reflections.
+    # A is the original matrix, b is the right-hand side.
+    n = A.shape[0]
+    
+    # First, factorize A into QR
+    R, householder_vectors, betas = qr_factor_householder(A)
+    
+    # Apply Q^T to b (Q^T b = (P_n-1 ... P_1) b)
+    # Each P_k = I - beta_k v_k v_k^T
+    # P_k b = b - beta_k v_k (v_k^T b)
+    b_transformed = b.copy()
+    for k in range(len(householder_vectors)):
+        v = householder_vectors[k]
+        beta = betas[k]
+        
+        # Apply reflection to the relevant part of b_transformed (from index k downwards)
+        b_transformed[k:] -= beta * np.dot(v, b_transformed[k:]) * v
+        
+    # Backward substitution: Rx = Q^T b
+    x = np.zeros(n, dtype=np.float64)
+    for i in range(n - 1, -1, -1):
+        if R[i, i] == 0:
+            raise ValueError(f"R matrix has a zero diagonal element at {i}, cannot solve.")
+        x[i] = (b_transformed[i] - np.dot(R[i, i+1:], x[i+1:])) / R[i, i]
+        
+    return x
+
+# 4. Conjugate Gradient (CG) Method with Jacobi Preconditioner (from scratch)
+def conjugate_gradient(A, b, tol=1e-9, max_iter=1000, preconditioner=None):
+    # Solves Ax = b using the Conjugate Gradient method.
+    # A must be symmetric positive definite.
+    # preconditioner: a function M_inv(r) that applies the inverse of the preconditioner M to r.
+    n = A.shape[0]
+    x = np.zeros(n, dtype=np.float64)
+    r = b - np.dot(A, x) # Initial residual
+    
+    # Apply preconditioner to initial residual
+    if preconditioner:
+        z = preconditioner(r)
+    else:
+        z = r.copy()
+        
+    p = z.copy() # Initial search direction
+    
+    r_dot_z = np.dot(r, z) # r_k^T z_k
+    
+    initial_b_norm = np.linalg.norm(b)
+    if initial_b_norm == 0: # Handle case where b is zero vector
+        return x
+
+    for i in range(max_iter):
+        Ap = np.dot(A, p) # A * p_k
+        
+        # Check for breakdown (p^T A p close to zero)
+        p_dot_Ap = np.dot(p, Ap)
+        if p_dot_Ap == 0:
+            # This can happen if A is not SPD or due to numerical issues
+            print(f"Warning: CG breakdown at iteration {i} due to p^T A p = 0.")
+            return x
+            
+        alpha = r_dot_z / p_dot_Ap # Step size alpha_k
+        
+        x_new = x + alpha * p # Update solution x_{k+1}
+        r_new = r - alpha * Ap # Update residual r_{k+1}
+        
+        # Check convergence using relative residual norm
+        if np.linalg.norm(r_new) < tol * initial_b_norm:
+            return x_new
+        
+        # Apply preconditioner to new residual
+        if preconditioner:
+            z_new = preconditioner(r_new)
+        else:
+            z_new = r_new.copy()
+            
+        r_dot_z_new = np.dot(r_new, z_new) # r_{k+1}^T z_{k+1}
+        
+        # Check for breakdown (r_dot_z close to zero)
+        if r_dot_z == 0:
+            print(f"Warning: CG breakdown at iteration {i} due to r^T z = 0.")
+            return x_new
+
+        beta = r_dot_z_new / r_dot_z # Update parameter beta_k
+        
+        p_new = z_new + beta * p # Update search direction p_{k+1}
+        
+        # Update for next iteration
+        x = x_new
+        r = r_new
+        z = z_new
+        p = p_new
+        r_dot_z = r_dot_z_new
+        
+    # If max_iter reached without convergence
+    print(f"Warning: CG did not converge within {max_iter} iterations. Final relative residual norm: {np.linalg.norm(r) / initial_b_norm:.2e}")
+    return x
+
+def jacobi_preconditioner(A_diag):
+    # Returns a function that applies the inverse of the Jacobi preconditioner.
+    # M_inv(r) = diag(A)^-1 * r
+    # A_diag is the diagonal of the matrix A.
+    # Handle zero diagonal elements for robustness, though Hilbert matrix has non-zero diagonals.
+    inv_diag = np.zeros_like(A_diag)
+    non_zero_mask = A_diag != 0
+    inv_diag[non_zero_mask] = 1.0 / A_diag[non_zero_mask]
+    
+    def M_inv(r):
+        return inv_diag * r
+    return M_inv
+
+# 5. Tikhonov Regularization (from scratch, using Cholesky for the regularized system)
+def tikhonov_regularization_solve(H_n, b, lambda_val):
+    # Solves the regularized system (H_n^T H_n + lambda I)x = H_n^T b.
+    # Uses the implemented Cholesky decomposition for the solution.
+    n = H_n.shape[0]
+    
+    # Form the regularized system matrix A_reg = H_n^T H_n + lambda I
+    A_reg = np.dot(H_n.T, H_n) + lambda_val * np.eye(n, dtype=np.float64)
+    
+    # Form the regularized right-hand side b_reg = H_n^T b
+    b_reg = np.dot(H_n.T, b)
+    
+    # Solve using Cholesky decomposition (A_reg is symmetric positive definite)
+    L_reg = cholesky_factor(A_reg)
+    x_tikhonov = cholesky_solve(L_reg, b_reg)
+    
+    return x_tikhonov
+
+# Main execution block
+if __name__ == "__main__":
+    n_values = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+    
+    # Store errors for plotting
+    errors_lu = []
+    errors_cholesky = []
+    errors_qr = []
+    errors_cg = []
+    errors_tikhonov = []
+
+    print("Solving H_n x = b for various n values and comparing L_infinity errors.")
+    print("-" * 80)
+
+    for n in n_values:
+        print(f"\nProcessing n = {n}")
+        H_n = generate_hilbert_matrix(n)
+        b, x_exact = generate_b_vector(H_n)
+
+        # --- LU Decomposition with Partial Pivoting ---
+        try:
+            LU, P = lu_factor_pivot(H_n)
+            x_lu = lu_solve_pivot(LU, P, b)
+            error_lu = calculate_l_infinity_error(x_lu, x_exact)
+            errors_lu.append(error_lu)
+            print(f"  LU (Pivoting) Error: {error_lu:.2e}")
+        except Exception as e:
+            errors_lu.append(np.nan) # Mark as NaN if error occurs
+            print(f"  LU (Pivoting) Error: Failed - {e}")
+
+        # --- Cholesky Decomposition ---
+        try:
+            L_cholesky = cholesky_factor(H_n)
+            x_cholesky = cholesky_solve(L_cholesky, b)
+            error_cholesky = calculate_l_infinity_error(x_cholesky, x_exact)
+            errors_cholesky.append(error_cholesky)
+            print(f"  Cholesky Error:      {error_cholesky:.2e}")
+        except Exception as e:
+            errors_cholesky.append(np.nan)
+            print(f"  Cholesky Error:      Failed - {e}")
+
+        # --- QR Decomposition via Householder Reflections ---
+        try:
+            x_qr = qr_solve_householder(H_n, b)
+            error_qr = calculate_l_infinity_error(x_qr, x_exact)
+            errors_qr.append(error_qr)
+            print(f"  QR (Householder) Error: {error_qr:.2e}")
+        except Exception as e:
+            errors_qr.append(np.nan)
+            print(f"  QR (Householder) Error: Failed - {e}")
+
+        # --- Conjugate Gradient with Jacobi Preconditioner ---
+        # CG tolerance is set relative to the initial norm of b.
+        # Max iterations are set to 2*n, a common heuristic.
+        cg_tol = 1e-10 
+        cg_max_iter = 2 * n 
+        
+        try:
+            # Prepare Jacobi preconditioner
+            A_diag = np.diag(H_n)
+            jacobi_M_inv = jacobi_preconditioner(A_diag)
+            
+            x_cg = conjugate_gradient(H_n, b, tol=cg_tol, max_iter=cg_max_iter, preconditioner=jacobi_M_inv)
+            error_cg = calculate_l_infinity_error(x_cg, x_exact)
+            errors_cg.append(error_cg)
+            print(f"  CG (Jacobi Prec) Error: {error_cg:.2e}")
+        except Exception as e:
+            errors_cg.append(np.nan)
+            print(f"  CG (Jacobi Prec) Error: Failed - {e}")
+
+        # --- Tikhonov Regularization ---
+        # Lambda choice is critical for Tikhonov regularization. A small fixed value is used.
+        # For Hilbert matrices, condition numbers grow extremely fast, so even a small lambda
+        # can significantly improve stability at the cost of introducing a slight bias.
+        lambda_tikhonov = 1e-10 
+        try:
+            x_tikhonov = tikhonov_regularization_solve(H_n, b, lambda_tikhonov)
+            error_tikhonov = calculate_l_infinity_error(x_tikhonov, x_exact)
+            errors_tikhonov.append(error_tikhonov)
+            print(f"  Tikhonov (lambda={lambda_tikhonov:.0e}) Error: {error_tikhonov:.2e}")
+        except Exception as e:
+            errors_tikhonov.append(np.nan)
+            print(f"  Tikhonov (lambda={lambda_tikhonov:.0e}) Error: Failed - {e}")
+            
+    print("-" * 80)
+    print("\nSummary of L_infinity Errors:")
+    for i, n_val in enumerate(n_values):
+        lu_err = f"{errors_lu[i]:.2e}" if not np.isnan(errors_lu[i]) else "Failed"
+        chol_err = f"{errors_cholesky[i]:.2e}" if not np.isnan(errors_cholesky[i]) else "Failed"
+        qr_err = f"{errors_qr[i]:.2e}" if not np.isnan(errors_qr[i]) else "Failed"
+        cg_err = f"{errors_cg[i]:.2e}" if not np.isnan(errors_cg[i]) else "Failed"
+        tikh_err = f"{errors_tikhonov[i]:.2e}" if not np.isnan(errors_tikhonov[i]) else "Failed"
+        print(f"n={n_val:2d}: LU={lu_err}, Cholesky={chol_err}, QR={qr_err}, CG={cg_err}, Tikhonov={tikh_err}")
+
+    # Plotting the results
+    plt.figure(figsize=(12, 8))
+    plt.semilogy(n_values, errors_lu, 'o-', label='LU with Partial Pivoting')
+    plt.semilogy(n_values, errors_cholesky, 's-', label='Cholesky Decomposition')
+    plt.semilogy(n_values, errors_qr, '^-', label='QR Decomposition (Householder)')
+    plt.semilogy(n_values, errors_cg, 'x-', label='Conjugate Gradient (Jacobi Prec)')
+    plt.semilogy(n_values, errors_tikhonov, 'd-', label=f'Tikhonov Regularization (λ={lambda_tikhonov:.0e})')
+
+    plt.xlabel('Matrix Size (n)')
+    plt.ylabel('L-infinity Error (log scale)')
+    plt.title('L-infinity Error vs. Matrix Size for Solving Hilbert System')
+    plt.legend()
+    plt.grid(True, which="both", ls="-")
+    plt.xticks(n_values)
+    plt.show()
+```
+****************************************

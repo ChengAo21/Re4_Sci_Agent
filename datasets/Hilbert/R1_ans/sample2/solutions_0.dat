@@ -1,0 +1,199 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ====================================================
+# SOLVER IMPLEMENTATIONS FROM SCRATCH
+# ====================================================
+
+# LU decomposition with partial pivoting solver
+def solve_lu(A, b):
+    """
+    Solve Ax = b using LU decomposition with partial pivoting.
+    Steps:
+    1. Factorize A into PA = LU
+    2. Solve Ly = Pb (forward substitution)
+    3. Solve Ux = y (backward substitution)
+    """
+    n = A.shape[0]
+    P = np.eye(n)  # Permutation matrix
+    U = A.copy()
+    L = np.eye(n)
+    
+    # Perform Gaussian elimination with partial pivoting
+    for k in range(n-1):
+        # Find pivot index
+        pivot = k + np.argmax(np.abs(U[k:, k]))
+        if pivot != k:
+            # Swap rows in U
+            U[[k, pivot]] = U[[pivot, k]]
+            # Swap rows in L
+            if k > 0:
+                L[[k, pivot], :k] = L[[pivot, k], :k]
+            # Swap rows in P
+            P[[k, pivot]] = P[[pivot, k]]
+        
+        # Elimination
+        for i in range(k+1, n):
+            L[i, k] = U[i, k] / U[k, k]
+            U[i, k:] -= L[i, k] * U[k, k:]
+    
+    # Solve Ly = Pb
+    Pb = P @ b
+    y = np.zeros(n)
+    for i in range(n):
+        y[i] = Pb[i] - np.dot(L[i, :i], y[:i])
+    
+    # Solve Ux = y
+    x = np.zeros(n)
+    for i in range(n-1, -1, -1):
+        x[i] = (y[i] - np.dot(U[i, i+1:], x[i+1:])) / U[i, i]
+    
+    return x
+
+# Cholesky decomposition solver (for symmetric positive definite matrices)
+def solve_cholesky(A, b):
+    """
+    Solve Ax = b using Cholesky decomposition.
+    Steps:
+    1. Factorize A into LL^T
+    2. Solve Ly = b (forward substitution)
+    3. Solve L^Tx = y (backward substitution)
+    """
+    n = A.shape[0]
+    L = np.zeros_like(A)
+    
+    # Cholesky factorization
+    for i in range(n):
+        # Diagonal element
+        s = np.dot(L[i, :i], L[i, :i])
+        L[i, i] = np.sqrt(A[i, i] - s)
+        
+        # Off-diagonal elements
+        for j in range(i+1, n):
+            s = np.dot(L[j, :i], L[i, :i])
+            L[j, i] = (A[j, i] - s) / L[i, i]
+    
+    # Solve Ly = b
+    y = np.zeros(n)
+    for i in range(n):
+        y[i] = (b[i] - np.dot(L[i, :i], y[:i])) / L[i, i]
+    
+    # Solve L^Tx = y
+    x = np.zeros(n)
+    for i in range(n-1, -1, -1):
+        x[i] = (y[i] - np.dot(L[i+1:, i], x[i+1:])) / L[i, i]
+    
+    return x
+
+# QR decomposition via Householder reflections solver
+def solve_qr(A, b):
+    """
+    Solve Ax = b using QR decomposition via Householder reflections.
+    Steps:
+    1. Factorize A into QR
+    2. Compute Q^Tb
+    3. Solve Rx = Q^Tb (backward substitution)
+    """
+    m, n = A.shape
+    R = A.copy()
+    Qb = b.copy()
+    
+    # Householder QR factorization
+    for k in range(n):
+        # Extract k-th column vector
+        x = R[k:, k]
+        e1 = np.zeros_like(x)
+        e1[0] = 1
+        
+        # Compute Householder vector
+        v = x + np.sign(x[0]) * np.linalg.norm(x) * e1
+        v = v / np.linalg.norm(v)
+        
+        # Apply reflection to R
+        R[k:, k:] -= 2 * np.outer(v, v @ R[k:, k:])
+        
+        # Apply reflection to b
+        Qb[k:] -= 2 * v * (v @ Qb[k:])
+    
+    # Solve Rx = Qb (backward substitution)
+    x = np.zeros(n)
+    for i in range(n-1, -1, -1):
+        x[i] = (Qb[i] - np.dot(R[i, i+1:], x[i+1:])) / R[i, i]
+    
+    return x
+
+# ====================================================
+# HILBERT MATRIX AND SOLUTION COMPARISON
+# ====================================================
+
+# Matrix sizes to test
+n_values = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+
+# Storage for errors
+errors_lu = []
+errors_cholesky = []
+errors_qr = []
+
+for n in n_values:
+    # Construct Hilbert matrix H
+    H = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            H[i, j] = 1.0 / (i + j + 1)  # i+j+1 because of 0-indexing
+    
+    # Exact solution (all ones)
+    x_exact = np.ones(n)
+    
+    # Construct right-hand side b = Hx_exact
+    b = H @ x_exact
+    
+    # Solve using different methods and compute errors
+    try:
+        x_lu = solve_lu(H, b)
+        errors_lu.append(np.max(np.abs(x_lu - x_exact)))
+    except Exception:
+        errors_lu.append(np.nan)
+    
+    try:
+        x_cholesky = solve_cholesky(H, b)
+        errors_cholesky.append(np.max(np.abs(x_cholesky - x_exact)))
+    except Exception:
+        errors_cholesky.append(np.nan)
+    
+    try:
+        x_qr = solve_qr(H, b)
+        errors_qr.append(np.max(np.abs(x_qr - x_exact)))
+    except Exception:
+        errors_qr.append(np.nan)
+
+# ====================================================
+# RESULTS VISUALIZATION
+# ====================================================
+
+# Create plot
+plt.figure(figsize=(10, 6))
+plt.semilogy(n_values, errors_lu, 'o-', label='LU Decomposition')
+plt.semilogy(n_values, errors_cholesky, 's-', label='Cholesky')
+plt.semilogy(n_values, errors_qr, 'd-', label='QR Householder')
+
+# Format plot
+plt.title('$L_\infty$ Error for Hilbert Matrix Solutions')
+plt.xlabel('Matrix Size $n$')
+plt.ylabel('$L_\infty$ Error (log scale)')
+plt.grid(True, which='both', linestyle='--', alpha=0.5)
+plt.legend()
+plt.tight_layout()
+
+# Save plot
+plt.savefig('hilbert_errors.png', dpi=300)
+plt.close()
+
+# Print results table
+print("n\tLU Error\t\tCholesky Error\t\tQR Error")
+for i, n in enumerate(n_values):
+    print(f"{n}\t{errors_lu[i]:.4e}\t{errors_cholesky[i]:.4e}\t{errors_qr[i]:.4e}")
+```
+****************************************

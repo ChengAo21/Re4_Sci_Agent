@@ -1,0 +1,163 @@
+
+****************************************
+Based on the problem requirements and stability considerations, I'll implement an explicit finite difference method with adaptive time stepping. This approach balances simplicity with stability by dynamically adjusting the time step based on both convection and diffusion constraints.
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# =============================================================================
+# Parameters and Grid Setup
+# =============================================================================
+# Physical parameters
+nu = 0.01 / np.pi  # Viscosity coefficient
+
+# Spatial discretization
+Nx = 201  # Number of spatial points
+x = np.linspace(-1, 1, Nx)  # Spatial grid [-1, 1]
+dx = x[1] - x[0]  # Spatial step size
+
+# Temporal discretization with adaptive time stepping
+T_final = 1.0  # Final time
+safety_factor = 0.5  # Safety factor for CFL condition
+t = 0.0  # Initialize time
+time_history = []  # Store time steps for plotting
+
+# =============================================================================
+# Initial Condition and Storage Setup
+# =============================================================================
+# Initialize solution array
+u = -np.sin(np.pi * x)  # u(x,0) = -sin(πx)
+
+# Apply boundary conditions
+u[0] = 0.0  # u(-1,t) = 0
+u[-1] = 0.0  # u(1,t) = 0
+
+# Storage for full solution history (for contour plot)
+solutions = [u.copy()]  # Store initial condition
+time_history.append(t)
+
+# =============================================================================
+# Time Integration Loop
+# =============================================================================
+while t < T_final:
+    # Compute stability constraints
+    max_u = np.max(np.abs(u))  # Maximum velocity magnitude
+    cfl_convection = dx / max_u if max_u > 1e-6 else float('inf')
+    cfl_diffusion = dx**2 / (2 * nu)
+    dt = safety_factor * min(cfl_convection, cfl_diffusion)
+    
+    # Adjust final step to exactly reach T_final
+    if t + dt > T_final:
+        dt = T_final - t
+    
+    # Create next solution array
+    u_next = np.zeros_like(u)
+    
+    # =========================================================================
+    # Finite Difference Computation
+    # =========================================================================
+    # Interior points (central differences)
+    for i in range(1, Nx-1):
+        # Central difference for u_x
+        u_x = (u[i+1] - u[i-1]) / (2*dx)
+        
+        # Central difference for u_xx
+        u_xx = (u[i+1] - 2*u[i] + u[i-1]) / (dx**2)
+        
+        # Burgers equation update
+        u_next[i] = u[i] + dt * (-u[i]*u_x + nu*u_xx)
+    
+    # Apply boundary conditions
+    u_next[0] = 0.0
+    u_next[-1] = 0.0
+    
+    # Update solution and time
+    u = u_next
+    t += dt
+    
+    # Store solution for visualization
+    solutions.append(u.copy())
+    time_history.append(t)
+
+# Convert solution history to array
+solution_array = np.array(solutions)
+
+# =============================================================================
+# Visualization and Output
+# =============================================================================
+# Create meshgrid for contour plot
+T, X = np.meshgrid(time_history, x, indexing='ij')
+
+# Figure 1: Contour plot of velocity magnitude
+plt.figure(figsize=(10, 6))
+contour = plt.contourf(X, T, solution_array, levels=50, cmap='viridis')
+plt.colorbar(contour, label='Velocity Magnitude')
+plt.xlabel('Spatial Coordinate (x)')
+plt.ylabel('Time (t)')
+plt.title('Velocity Contour: 1D Burgers Equation')
+plt.savefig('burgers_contour.png')
+plt.close()
+
+# Figure 2: Velocity profile at final time
+plt.figure(figsize=(10, 6))
+plt.plot(x, solution_array[-1], 'b-', linewidth=2)
+plt.xlabel('Spatial Coordinate (x)')
+plt.ylabel('Velocity (u)')
+plt.title(f'Velocity Profile at t = {T_final:.2f}')
+plt.grid(True)
+plt.savefig('burgers_profile.png')
+plt.close()
+
+# =============================================================================
+# Diagnostic Output
+# =============================================================================
+print("="*60)
+print("Burgers Equation Simulation Summary")
+print("="*60)
+print(f"Spatial Resolution: Nx = {Nx}, dx = {dx:.4e}")
+print(f"Temporal Resolution: {len(time_history)} time steps")
+print(f"Final Time: t = {T_final:.2f}")
+print(f"Viscosity Parameter: ν = {nu:.4e}")
+print("\nInitial Condition:")
+print(f"  Max velocity: {np.max(np.abs(solution_array[0])):.4f}")
+print(f"  Min velocity: {np.min(solution_array[0]):.4f}")
+print("\nFinal Solution:")
+print(f"  Max velocity: {np.max(np.abs(solution_array[-1])):.4f}")
+print(f"  Min velocity: {np.min(solution_array[-1]):.4f}")
+print("="*60)
+print("Figures saved: burgers_contour.png, burgers_profile.png")
+```
+
+### Technical Explanation:
+
+1. **Numerical Scheme**:
+   - Explicit forward Euler time integration
+   - Central differences for spatial derivatives:
+     - Convection term: \(u_x \approx \frac{u_{i+1} - u_{i-1}}{2\Delta x}\)
+     - Diffusion term: \(u_{xx} \approx \frac{u_{i+1} - 2u_i + u_{i-1}}{\Delta x^2}\)
+   - Adaptive time stepping based on CFL conditions
+
+2. **Stability Handling**:
+   - Convection constraint: \(\Delta t \leq \frac{\Delta x}{\max|u|}\)
+   - Diffusion constraint: \(\Delta t \leq \frac{\Delta x^2}{2\nu}\)
+   - Safety factor (0.5) ensures stability for nonlinear evolution
+
+3. **Boundary Conditions**:
+   - Dirichlet conditions enforced at each time step:
+     - \(u(-1,t) = 0\)
+     - \(u(1,t) = 0\)
+
+4. **Visualization**:
+   - Space-time contour plot of velocity magnitude
+   - Final velocity profile at t=1.0
+   - Viridis colormap chosen for perceptual uniformity
+
+### Computational Considerations:
+- **Grid Independence**: Spatial resolution (Nx=201) balances accuracy and computational cost
+- **Adaptive Time Stepping**: Dynamically adjusts to solution behavior
+- **Memory Management**: Stores only necessary solution history for visualization
+- **Boundary Treatment**: Explicit enforcement maintains stability at domain edges
+
+The implementation captures the nonlinear wave steepening and viscous diffusion behaviors characteristic of Burgers' equation, while the diagnostic output provides quantitative assessment of the solution evolution.
+****************************************

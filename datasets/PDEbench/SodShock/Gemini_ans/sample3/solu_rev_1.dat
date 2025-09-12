@@ -1,0 +1,474 @@
+
+****************************************
+The previous solution for the Euler equations, while functional, employed a first-order spatial discretization (piecewise constant states) and a first-order explicit Euler time integration. The teacher's feedback highlighted several areas for improvement, primarily focusing on enhancing numerical accuracy, optimizing performance through vectorization, and improving code structure.
+
+The refined solution incorporates the following key changes:
+
+1.  **Second-Order Spatial Accuracy (MUSCL-Hancock with Minmod Limiter)**:
+    *   **Optimization**: This is a significant algorithmic improvement. Instead of assuming piecewise constant cell-averaged values, the solution now reconstructs piecewise linear profiles within each cell. This allows for more accurate estimation of the left and right states at cell interfaces, which are then fed into the HLLC Riemann solver.
+    *   **Implementation**: A `minmod_limiter` function has been added to compute slopes for the reconstruction. The `compute_numerical_fluxes` function now performs the MUSCL reconstruction by extending the conserved variable array with ghost cells, calculating slopes, and then reconstructing the left (`UL_interface_batch`) and right (`UR_interface_batch`) states at each interface. This significantly reduces numerical diffusion, leading to sharper resolution of shocks and contact discontinuities.
+
+2.  **Second-Order Temporal Accuracy (SSP-RK2)**:
+    *   **Optimization**: The explicit Euler time integration has been replaced with a two-stage Strong Stability Preserving Runge-Kutta (SSP-RK2) method. This improves the temporal accuracy from first to second order, allowing for a more accurate evolution of the solution over time while maintaining stability properties.
+    *   **Implementation**: The main simulation loop now performs two stages of flux computation and updates per time step, as described in the SSP-RK2 formulation.
+
+3.  **Vectorization of Core Computations**:
+    *   **Optimization**: The `hllc_riemann_solver` function, along with helper functions like `primitive_to_conserved`, `conserved_to_primitive`, and `compute_flux`, have been fully vectorized. Instead of iterating through interfaces or states in Python loops, these functions now operate on entire NumPy arrays (batches of states/interfaces) simultaneously. This leverages NumPy's highly optimized C/Fortran backend, leading to substantial performance improvements, especially for larger grid sizes.
+    *   **Implementation**: All array operations within these functions now use NumPy's element-wise operations, broadcasting, and vectorized conditional assignments (`np.where`, boolean masks) to avoid explicit Python loops.
+
+4.  **Code Structure and Readability**:
+    *   **Modularization**: The main simulation logic is now encapsulated within a `solve_euler_equations` function, improving code organization and reusability.
+    *   **Documentation**: Docstrings have been added to all functions, providing clear explanations of their purpose, arguments, and return values.
+    *   **Logging**: Standard Python `logging` module is used instead of `print` statements for progress updates, offering better control over output verbosity and formatting.
+
+5.  **Plotting Enhancements**:
+    *   The plot is now saved with a higher DPI (300 dpi) for better visual quality.
+    *   The plot title reflects the use of the HLLC-MUSCL-SSP-RK2 scheme.
+
+These enhancements collectively lead to a more accurate, efficient, and robust numerical solver for the Euler equations, addressing the key points raised in the teacher's feedback.
+
+```python
+# Import necessary libraries
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import logging # For better logging
+
+# --- Technical Explanation for the Solving Algorithm ---
+# The chosen algorithm is the Finite Volume Method (FVM) with a second-order
+# MUSCL-Hancock scheme for spatial reconstruction and the HLLC (Harten-Lax-van Leer-Contact)
+# approximate Riemann solver for numerical fluxes. Time integration is performed
+# using a second-order Strong Stability Preserving Runge-Kutta (SSP-RK2) method.
+# This combination is well-suited for hyperbolic conservation laws like the Euler
+# equations, especially when dealing with discontinuities (shocks, contact
+# discontinuities, rarefaction waves) as in the Sod shock tube problem, offering
+# a good balance of accuracy, robustness, and computational efficiency.
+
+# 1. Finite Volume Discretization:
+#    The spatial domain [0,1] is divided into N_cells control volumes (cells).
+#    The conserved variables U = [rho, rho*u, rho*E]^T are stored as cell-averaged values.
+#    The governing equations are integrated over each cell, leading to an update rule:
+#    U_i^{n+1} = U_i^n - (dt/dx) * (F_{i+1/2} - F_{i-1/2}),
+#    where U_i is the cell-averaged conserved variable in cell i, dt is the time step,
+#    dx is the cell width, and F_{i+1/2} and F_{i-1/2} are the numerical fluxes
+#    at the right and left interfaces of cell i, respectively. This formulation
+#    inherently ensures conservation of mass, momentum, and energy.
+
+# 2. MUSCL-Hancock Reconstruction (Second-Order Spatial Accuracy):
+#    To achieve second-order spatial accuracy, the cell-averaged values are
+#    reconstructed to obtain left (UL) and right (UR) states at each cell interface.
+#    This is done using a piecewise linear reconstruction. Slope limiters (e.g., minmod)
+#    are applied to prevent spurious oscillations near discontinuities (shocks, contact
+#    discontinuities) that would otherwise arise from linear reconstruction.
+#    For an interface between cell i and cell i+1, the left state UL_{i+1/2} is
+#    reconstructed from cell i's average value and its slope, and the right state
+#    UR_{i+1/2} is reconstructed from cell i+1's average value and its slope.
+#    Specifically, UL_{i+1/2} = U_i + 0.5 * slope_i and UR_{i+1/2} = U_{i+1} - 0.5 * slope_{i+1}.
+#    The minmod limiter ensures that the reconstructed values do not create new extrema.
+
+# 3. HLLC Riemann Solver:
+#    The core of the method is the HLLC Riemann solver, which computes the numerical
+#    flux F at each cell interface using the reconstructed left (UL) and right (UR) states.
+#    The HLLC solver is an approximate Riemann solver that improves upon the simpler HLL
+#    solver by explicitly accounting for the contact discontinuity, which is crucial for
+#    accurate resolution of the Sod shock tube problem.
+#    The HLLC solver estimates three wave speeds: S_L (leftmost wave), S_R (rightmost wave),
+#    and S_star (speed of the contact discontinuity). These wave speeds define four
+#    regions in the x-t plane. The flux is then computed piecewise based on the sign
+#    of these wave speeds relative to zero. The wave speed estimation for S_L and S_R
+#    uses an approximate pressure in the star region (p_star_guess) to account for
+#    the non-linear nature of shocks. S_star is derived from momentum conservation
+#    across the contact.
+
+# 4. SSP-RK2 Time Integration (Second-Order Temporal Accuracy):
+#    A Strong Stability Preserving Runge-Kutta (SSP-RK2) method is used for time integration.
+#    This is a two-stage method that improves temporal accuracy over the explicit Euler
+#    method while maintaining stability properties.
+#    The update proceeds as follows:
+#    Stage 1 (Euler step): U^(1) = U^n - (dt/dx) * (F_{i+1/2}^n - F_{i-1/2}^n)
+#    Stage 2: U^(n+1) = 0.5 * U^n + 0.5 * (U^(1) - (dt/dx) * (F_{i+1/2}^{(1)} - F_{i-1/2}^{(1)}))
+#    where F^n are fluxes computed from U^n, and F^(1) are fluxes computed from U^(1).
+#    The time step (dt) is determined by the CFL condition: dt = CFL * dx / max_wave_speed.
+#    The maximum wave speed is calculated across all cells as max(|u| + c), where
+#    c is the local speed of sound. This condition ensures numerical stability.
+
+# 5. Boundary Conditions:
+#    Transmissive (outflow) boundary conditions are applied using ghost cells. This means
+#    that the ghost cells (cells outside the computational domain) are assigned the values
+#    of the adjacent interior computational cells. This allows waves to exit the domain
+#    without reflection. For MUSCL reconstruction, ghost cells are also used to compute
+#    slopes at the boundaries.
+
+# 6. Primitive and Conserved Variable Conversion:
+#    Helper functions are used to convert between primitive variables (rho, u, p)
+#    and conserved variables (rho, rho*u, rho*E) as needed for initialization,
+#    flux computation, and post-processing. The total specific energy E is defined as
+#    E = 0.5 * u^2 + p / ((gamma - 1) * rho).
+
+# The HLLC scheme with MUSCL reconstruction and SSP-RK2 time integration provides a robust
+# and accurate solution for the Sod shock tube problem, effectively capturing the complex
+# wave structures (shock, contact discontinuity, rarefaction wave) with reduced numerical
+# diffusion compared to first-order schemes.
+
+# --- Optimized Sections ---
+# 1. Vectorization of HLLC Riemann Solver: The `hllc_riemann_solver` function has been
+#    rewritten to operate on entire arrays of left and right states (UL_batch, UR_batch)
+#    simultaneously, rather than processing one interface at a time in a loop. This
+#    leverages NumPy's optimized array operations, significantly improving computational
+#    performance, especially for large numbers of cells.
+# 2. Vectorization of Helper Functions: `primitive_to_conserved`, `conserved_to_primitive`,
+#    and `compute_flux` have also been vectorized to handle batches of states, supporting
+#    the vectorized HLLC solver and overall efficiency.
+# 3. Higher-Order Methods:
+#    - Spatial Accuracy: Implementation of MUSCL-Hancock reconstruction with a minmod
+#      limiter elevates the spatial accuracy from first-order (piecewise constant) to
+#      second-order (piecewise linear). This reduces numerical diffusion and provides
+#      sharper resolution of discontinuities.
+#    - Temporal Accuracy: Replacing the explicit Euler time integration with a second-order
+#      SSP-RK2 scheme improves the temporal accuracy, allowing for potentially larger
+#      stable time steps (though CFL still governs) and more accurate evolution over time.
+
+# --- Constants and Parameters ---
+gamma = 1.4  # Ratio of specific heats for ideal gas
+CFL = 0.8    # Courant-Friedrichs-Lewy number for stability (should be < 1 for explicit methods)
+N_cells = 200 # Number of computational cells
+x_min = 0.0  # Left boundary of the domain
+x_max = 1.0  # Right boundary of the domain
+t_final = 0.2 # Final time for simulation
+
+# --- Discretization ---
+dx = (x_max - x_min) / N_cells
+x_centers = np.linspace(x_min + 0.5 * dx, x_max - 0.5 * dx, N_cells)
+
+# --- Setup Logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Helper Functions for State Conversion (Vectorized) ---
+
+def primitive_to_conserved(rho_batch, u_batch, p_batch):
+    """
+    Calculates conserved variables from primitive variables for a batch of states.
+    Args:
+        rho_batch (np.ndarray): Array of densities.
+        u_batch (np.ndarray): Array of velocities.
+        p_batch (np.ndarray): Array of pressures.
+    Returns:
+        np.ndarray: Array of conserved variables U = [rho, rho*u, rho*E] (shape: 3 x N_states).
+    """
+    rho_u_batch = rho_batch * u_batch
+    rho_E_batch = rho_batch * (0.5 * u_batch**2 + p_batch / ((gamma - 1) * rho_batch))
+    return np.array([rho_batch, rho_u_batch, rho_E_batch])
+
+def conserved_to_primitive(U_batch):
+    """
+    Calculates primitive variables from conserved variables for a batch of states.
+    Args:
+        U_batch (np.ndarray): Array of conserved variables U = [rho, rho*u, rho*E] (shape: 3 x N_states).
+    Returns:
+        tuple: (rho_batch, u_batch, p_batch) - Arrays of density, velocity, and pressure.
+    """
+    rho_batch = U_batch[0]
+    u_batch = U_batch[1] / rho_batch
+    # Pressure calculation: p = (gamma - 1) * (rho_E - 0.5 * rho_u^2 / rho)
+    p_batch = (gamma - 1) * (U_batch[2] - 0.5 * U_batch[1]**2 / rho_batch)
+    # Numerical safeguard: ensure pressure is non-negative
+    p_batch = np.maximum(p_batch, 1e-12) # Small positive value to prevent negative pressure
+    return rho_batch, u_batch, p_batch
+
+def compute_flux(U_conserved_batch):
+    """
+    Computes the physical flux vector F from conserved variables for a batch of states.
+    Args:
+        U_conserved_batch (np.ndarray): Array of conserved variables (shape: 3 x N_states).
+    Returns:
+        np.ndarray: Array of physical fluxes F = [rho*u, rho*u^2 + p, (rho*E + p)*u] (shape: 3 x N_states).
+    """
+    rho_batch, u_batch, p_batch = conserved_to_primitive(U_conserved_batch)
+    rho_u_batch = U_conserved_batch[1] # Momentum (rho*u)
+    rho_E_batch = U_conserved_batch[2] # Total energy (rho*E)
+    
+    flux_rho = rho_u_batch
+    flux_rho_u = rho_u_batch * u_batch + p_batch
+    flux_rho_E = (rho_E_batch + p_batch) * u_batch
+    return np.array([flux_rho, flux_rho_u, flux_rho_E])
+
+# --- Slope Limiter for MUSCL Reconstruction ---
+def minmod_limiter(s_minus, s_plus):
+    """
+    Minmod slope limiter.
+    Args:
+        s_minus (np.ndarray): Left difference (U_i - U_{i-1}).
+        s_plus (np.ndarray): Right difference (U_{i+1} - U_i).
+    Returns:
+        np.ndarray: Limited slope.
+    """
+    # Ensure s_minus and s_plus have the same shape
+    assert s_minus.shape == s_plus.shape, "s_minus and s_plus must have the same shape"
+
+    # Initialize slope array with zeros
+    slope = np.zeros_like(s_minus)
+
+    # Find indices where s_minus and s_plus have the same sign
+    same_sign_mask = np.sign(s_minus) == np.sign(s_plus)
+
+    # For elements with the same sign, apply minmod: sign(a) * min(|a|, |b|)
+    slope[same_sign_mask] = np.sign(s_minus[same_sign_mask]) * \
+                            np.minimum(np.abs(s_minus[same_sign_mask]), np.abs(s_plus[same_sign_mask]))
+    
+    return slope
+
+# --- HLLC Riemann Solver (Vectorized) ---
+def hllc_riemann_solver(UL_batch, UR_batch):
+    """
+    Vectorized HLLC Riemann solver for a batch of left and right states at interfaces.
+    Args:
+        UL_batch (np.ndarray): Left states at interfaces (shape: 3 x N_interfaces).
+        UR_batch (np.ndarray): Right states at interfaces (shape: 3 x N_interfaces).
+    Returns:
+        np.ndarray: Numerical fluxes at interfaces (shape: 3 x N_interfaces).
+    """
+    # Convert conserved to primitive variables for both states
+    rho_L, u_L, p_L = conserved_to_primitive(UL_batch)
+    rho_R, u_R, p_R = conserved_to_primitive(UR_batch)
+
+    # Calculate speed of sound for both states
+    c_L = np.sqrt(gamma * p_L / rho_L)
+    c_R = np.sqrt(gamma * p_R / rho_R)
+
+    # Estimate pressure in the star region (p_star_guess) for wave speed estimation
+    p_star_guess = 0.5 * (p_L + p_R) + 0.5 * (u_L - u_R) * (rho_L * c_L + rho_R * c_R)
+    p_star_guess = np.maximum(1e-12, p_star_guess) # Ensure positive pressure
+
+    # Calculate q_L and q_R factors for shock wave speed estimation
+    q_L = np.ones_like(p_L)
+    shock_L_mask = p_star_guess > p_L
+    q_L[shock_L_mask] = np.sqrt(1 + (gamma + 1)/(2*gamma) * (p_star_guess[shock_L_mask]/p_L[shock_L_mask] - 1))
+    
+    q_R = np.ones_like(p_R)
+    shock_R_mask = p_star_guess > p_R
+    q_R[shock_R_mask] = np.sqrt(1 + (gamma + 1)/(2*gamma) * (p_star_guess[shock_R_mask]/p_R[shock_R_mask] - 1))
+
+    # Estimate the fastest left (S_L) and right (S_R) wave speeds
+    S_L = u_L - c_L * q_L
+    S_R = u_R + c_R * q_R
+
+    # Calculate the contact discontinuity speed (S_star)
+    denominator = (rho_L * (S_L - u_L) - rho_R * (S_R - u_R))
+    # Use np.where for vectorized conditional assignment to prevent division by zero
+    S_star = np.where(np.abs(denominator) < 1e-12,
+                      (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / (denominator + 1e-12 * np.sign(denominator)),
+                      (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / denominator)
+
+    # Compute the physical fluxes for the left and right states
+    F_L = compute_flux(UL_batch)
+    F_R = compute_flux(UR_batch)
+
+    # Extract total specific energies for left and right states
+    E_L = UL_batch[2] / UL_batch[0]
+    E_R = UR_batch[2] / UR_batch[0]
+
+    # Calculate the total specific energies in the star regions (E_star_L, E_star_R)
+    E_star_L = E_L + (S_star - u_L) * (S_star + p_L / (rho_L * (S_L - u_L)))
+    E_star_R = E_R + (S_star - u_R) * (S_star + p_R / (rho_R * (S_R - u_R)))
+
+    # Calculate densities in the star regions (rho_star_L, rho_star_R)
+    rho_star_L = rho_L * (S_L - u_L) / (S_L - S_star)
+    rho_star_R = rho_R * (S_R - u_R) / (S_R - S_star)
+
+    # Construct the conserved variable vectors for the star regions (U_star_L, U_star_R)
+    U_star_L = np.array([rho_star_L, rho_star_L * S_star, rho_star_L * E_star_L])
+    U_star_R = np.array([rho_star_R, rho_star_R * S_star, rho_star_R * E_star_R])
+
+    # Determine the HLLC flux based on the wave speeds using vectorized conditions
+    F_HLLC = np.zeros_like(F_L)
+
+    # Case 1: S_L >= 0 (All waves are moving to the right, so the flux is F_L)
+    mask1 = S_L >= 0
+    F_HLLC[:, mask1] = F_L[:, mask1]
+
+    # Case 2: S_R <= 0 (All waves are moving to the left, so the flux is F_R)
+    mask2 = S_R <= 0
+    F_HLLC[:, mask2] = F_R[:, mask2]
+
+    # Case 3: S_L < 0 and S_star >= 0 (Left wave moves left, contact and right wave move right or are stationary)
+    # The flux is determined by the left state and the left-star state
+    mask3 = (S_L < 0) & (S_star >= 0)
+    F_HLLC[:, mask3] = F_L[:, mask3] + S_L[mask3] * (U_star_L[:, mask3] - UL_batch[:, mask3])
+
+    # Case 4: S_star < 0 and S_R > 0 (Left wave and contact move left or are stationary, right wave moves right)
+    # The flux is determined by the right state and the right-star state
+    mask4 = (S_star < 0) & (S_R > 0)
+    F_HLLC[:, mask4] = F_R[:, mask4] + S_R[mask4] * (U_star_R[:, mask4] - UR_batch[:, mask4])
+    
+    # Check for unhandled cases (should ideally not happen if logic is exhaustive for physical states)
+    unhandled_mask = ~(mask1 | mask2 | mask3 | mask4)
+    if np.any(unhandled_mask):
+        logging.warning("HLLC solver encountered unhandled wave configurations at some interfaces.")
+        # In a production code, this might indicate a problem with the wave speed estimates
+        # or extreme states. For robustness, one might assign an HLL flux here.
+
+    return F_HLLC
+
+def compute_numerical_fluxes(U_cell_avg, dx_val):
+    """
+    Computes numerical fluxes at cell interfaces using MUSCL reconstruction and HLLC solver.
+    Args:
+        U_cell_avg (np.ndarray): Cell-averaged conserved variables (shape: 3 x N_cells).
+        dx_val (float): Cell width (not directly used in this function, but kept for signature consistency).
+    Returns:
+        np.ndarray: Numerical fluxes at interfaces (shape: 3 x N_cells + 1).
+    """
+    N_cells_local = U_cell_avg.shape[1]
+    
+    # 1. Extend U with ghost cells for boundary conditions and slope calculation
+    U_ext = np.zeros((3, N_cells_local + 2))
+    U_ext[:, 1:-1] = U_cell_avg # Copy current U into the interior cells
+    
+    # Apply outflow boundary conditions
+    U_ext[:, 0] = U_cell_avg[:, 0]   # Left ghost cell takes value of first computational cell
+    U_ext[:, -1] = U_cell_avg[:, -1] # Right ghost cell takes value of last computational cell
+
+    # 2. Compute slopes for all cells (including ghost cells)
+    # delta_minus[i] = U_ext[i+1] - U_ext[i]
+    # delta_plus[i] = U_ext[i+2] - U_ext[i+1]
+    # slopes_ext[i] corresponds to slope for U_ext[:, i+1]
+    delta_minus = U_ext[:, 1:] - U_ext[:, :-1] # Shape (3, N_cells + 1)
+    delta_plus = U_ext[:, 2:] - U_ext[:, 1:-1] # Shape (3, N_cells + 1)
+    
+    # Apply minmod limiter to get slopes for each cell (from index 0 to N_cells in slopes_ext)
+    # slopes_ext[:, i] is the slope for U_ext[:, i+1]
+    slopes_ext = minmod_limiter(delta_minus, delta_plus) # Shape (3, N_cells + 1)
+
+    # 3. Reconstruct states at interfaces
+    # For interface j (from 0 to N_cells), which is between U_ext[:, j+1] and U_ext[:, j+2]:
+    # UL_interface_batch[:, j] = U_ext[:, j+1] + 0.5 * slopes_ext[:, j]
+    # UR_interface_batch[:, j] = U_ext[:, j+2] - 0.5 * slopes_ext[:, j+1]
+    
+    UL_interface_batch = U_ext[:, 1:-1] + 0.5 * slopes_ext[:, :-1]
+    UR_interface_batch = U_ext[:, 2:] - 0.5 * slopes_ext[:, 1:]
+
+    # 4. Compute numerical fluxes using the vectorized HLLC solver
+    F_numerical = hllc_riemann_solver(UL_interface_batch, UR_interface_batch)
+    
+    return F_numerical
+
+# --- Main Simulation Function ---
+def solve_euler_equations():
+    """
+    Solves the 1D Euler equations using a second-order FVM with MUSCL-Hancock,
+    HLLC Riemann solver, and SSP-RK2 time integration.
+    """
+    logging.info("Starting Euler Equations Simulation (HLLC Scheme with MUSCL-SSP-RK2)")
+    logging.info(f"Domain: [{x_min}, {x_max}], Number of cells: {N_cells}, dx: {dx:.4f}")
+    logging.info(f"Final time: {t_final}, CFL: {CFL}")
+
+    # --- Initial Conditions (Sod Shock Tube Problem) ---
+    # U_initial is a 3xN_cells array, where each row corresponds to a conserved variable
+    # (rho, rho*u, rho*E) and each column corresponds to a cell.
+    U_initial = np.zeros((3, N_cells))
+
+    # Define the left state (0 < x <= 0.5)
+    rho_L_init = 1.0
+    u_L_init = 0.0
+    p_L_init = 1.0
+    # Use np.array for single values to make them compatible with vectorized functions
+    U_L_init_conserved = primitive_to_conserved(np.array([rho_L_init]), np.array([u_L_init]), np.array([p_L_init]))[:, 0]
+
+    # Define the right state (0.5 < x < 1)
+    rho_R_init = 0.125
+    u_R_init = 0.0
+    p_R_init = 0.1
+    U_R_init_conserved = primitive_to_conserved(np.array([rho_R_init]), np.array([u_R_init]), np.array([p_R_init]))[:, 0]
+
+    # Apply initial conditions to the computational cells using boolean indexing and broadcasting
+    left_cells_mask = x_centers <= 0.5
+    U_initial[:, left_cells_mask] = U_L_init_conserved[:, np.newaxis]
+    U_initial[:, ~left_cells_mask] = U_R_init_conserved[:, np.newaxis]
+
+    # Initialize the current state of conserved variables and time
+    U = U_initial.copy()
+    t = 0.0
+    iteration = 0
+
+    # --- Main Simulation Loop (SSP-RK2) ---
+    while t < t_final:
+        # Calculate time step (dt) based on the CFL condition
+        rho_current, u_current, p_current = conserved_to_primitive(U)
+        c_current = np.sqrt(gamma * p_current / rho_current)
+        max_wave_speed = np.max(np.abs(u_current) + c_current)
+        
+        dt = CFL * dx / max_wave_speed
+        
+        # Adjust dt to ensure we don't overshoot the final time
+        if t + dt > t_final:
+            dt = t_final - t
+        
+        # --- SSP-RK2 Stage 1 ---
+        # Compute fluxes for the current state U^n
+        F_n = compute_numerical_fluxes(U, dx)
+        
+        # Update to intermediate state U^(1) (Euler step)
+        # U_i^(1) = U_i^n - (dt/dx) * (F_{i+1/2}^n - F_{i-1/2}^n)
+        U_star = U - (dt / dx) * (F_n[:, 1:] - F_n[:, :-1])
+
+        # --- SSP-RK2 Stage 2 ---
+        # Compute fluxes for the intermediate state U^(1)
+        F_star = compute_numerical_fluxes(U_star, dx)
+        
+        # Update to next time step U^(n+1)
+        # U_i^(n+1) = 0.5 * U_i^n + 0.5 * (U_i^(1) - (dt/dx) * (F_{i+1/2}^{(1)} - F_{i-1/2}^{(1)}))
+        U_new = 0.5 * U + 0.5 * (U_star - (dt / dx) * (F_star[:, 1:] - F_star[:, :-1]))
+        
+        # Update the state and time
+        U = U_new
+        t += dt
+        iteration += 1
+        
+        # Log progress periodically
+        if iteration % 50 == 0 or t >= t_final:
+            logging.info(f"Time: {t:.4f}/{t_final:.4f}, dt: {dt:.6f}, Iteration: {iteration}")
+
+    logging.info(f"Simulation finished at t = {t:.4f} after {iteration} iterations.")
+    return U
+
+# --- Execute Simulation and Plot Results ---
+if __name__ == "__main__":
+    final_conserved_state = solve_euler_equations()
+
+    # Post-processing and Plotting
+    rho_final, u_final, p_final = conserved_to_primitive(final_conserved_state)
+
+    # Create a single figure with three subplots to display density, velocity, and pressure
+    fig, axs = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+    fig.suptitle(f'Sod Shock Tube Problem at t = {t_final:.2f} (HLLC-MUSCL-SSP-RK2, N={N_cells})', fontsize=16)
+
+    # Plot Density (rho)
+    axs[0].plot(x_centers, rho_final, 'b-', label='Density (rho)')
+    axs[0].set_ylabel('Density (rho)')
+    axs[0].grid(True)
+    axs[0].legend()
+
+    # Plot Velocity (u)
+    axs[1].plot(x_centers, u_final, 'r-', label='Velocity (u)')
+    axs[1].set_ylabel('Velocity (u)')
+    axs[1].grid(True)
+    axs[1].legend()
+
+    # Plot Pressure (p)
+    axs[2].plot(x_centers, p_final, 'g-', label='Pressure (p)')
+    axs[2].set_xlabel('Position (x)')
+    axs[2].set_ylabel('Pressure (p)')
+    axs[2].grid(True)
+    axs[2].legend()
+
+    # Adjust layout to prevent titles/labels from overlapping
+    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+
+    # Define the filename for the plot
+    plot_filename = "sod_shock_tube_hllc_muscl_ssprk2.png"
+
+    # Save the plot to a file without displaying it, with higher DPI
+    plt.savefig(plot_filename, dpi=300)
+    logging.info(f"Plot saved as {plot_filename}")
+```
+****************************************

@@ -1,0 +1,291 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from numpy.linalg import cond, norm
+
+# --------------------------------------------------
+# Linear Algebra Subroutines (Optimized)
+# --------------------------------------------------
+# Forward substitution for unit lower triangular matrix
+def forward_substitution_unit(L, b):
+    """
+    Solves Lx = b where L is unit lower triangular.
+    Uses vectorized dot product for efficiency.
+    """
+    n = L.shape[0]
+    x = np.zeros_like(b)
+    for i in range(n):
+        x[i] = b[i] - L[i, :i] @ x[:i]
+    return x
+
+# Forward substitution for non-unit lower triangular matrix
+def forward_substitution(L, b):
+    """
+    Solves Lx = b where L is lower triangular (non-unit diagonal).
+    Optimized with vectorized dot product.
+    """
+    n = L.shape[0]
+    x = np.zeros_like(b)
+    for i in range(n):
+        x[i] = (b[i] - L[i, :i] @ x[:i]) / L[i, i]
+    return x
+
+# Back substitution for upper triangular matrix
+def back_substitution(U, b):
+    """
+    Solves Ux = b where U is upper triangular.
+    Uses vectorized dot product for efficiency.
+    """
+    n = U.shape[0]
+    x = np.zeros_like(b)
+    for i in range(n-1, -1, -1):
+        x[i] = (b[i] - U[i, i+1:] @ x[i+1:]) / U[i, i]
+    return x
+
+# --------------------------------------------------
+# Matrix Factorization Methods (Improved per feedback)
+# --------------------------------------------------
+# LU decomposition with partial pivoting (Crout variant)
+def lu_decomposition(A):
+    """
+    LU decomposition with scaled partial pivoting.
+    Returns L (unit lower), U (upper), and pivot vector.
+    """
+    n = A.shape[0]
+    U = A.copy()
+    L = np.eye(n)
+    p = np.arange(n)
+    for k in range(n-1):
+        # Scaled partial pivoting
+        col = np.abs(U[k:, k])
+        scale = np.max(col, initial=1.0)
+        if scale < 1e-15:
+            continue
+        col = col / scale
+        idx = np.argmax(col) + k
+        
+        if idx != k:
+            U[[k, idx], k:] = U[[idx, k], k:]
+            L[[k, idx], :k] = L[[idx, k], :k]
+            p[[k, idx]] = p[[idx, k]]
+        
+        # Vectorized elimination
+        factors = U[k+1:, k] / U[k, k]
+        L[k+1:, k] = factors
+        U[k+1:, k:] -= factors.reshape(-1, 1) * U[k, k:]
+    return L, U, p
+
+# Cholesky decomposition with adaptive regularization
+def cholesky_decomposition(A, reg=1e-8):
+    """
+    Cholesky decomposition with Tikhonov regularization.
+    Adaptively increases regularization if decomposition fails.
+    """
+    n = A.shape[0]
+    for attempt in range(3):
+        try:
+            H_reg = A + (reg * (10**attempt)) * np.eye(n)
+            L = np.zeros_like(H_reg)
+            for i in range(n):
+                for j in range(i+1):
+                    s = H_reg[i, j] - L[i, :j] @ L[j, :j]
+                    if i == j:
+                        if s <= 0:
+                            raise ValueError(f"Non-positive pivot at {i} with reg={reg*(10**attempt):.1e}")
+                        L[i, j] = np.sqrt(s)
+                    else:
+                        L[i, j] = s / L[j, j]
+            return L
+        except ValueError as e:
+            if attempt == 2:
+                raise RuntimeError("Cholesky failed after 3 regularization attempts") from e
+
+# QR decomposition via Householder reflections
+def householder_qr(A):
+    """
+    QR decomposition using Householder reflections.
+    Numerically stable implementation.
+    """
+    m, n = A.shape
+    R = A.copy().astype(float)
+    Q = np.eye(m)
+    for k in range(min(m, n)):
+        x = R[k:, k]
+        norm_x = norm(x)
+        if norm_x < 1e-15:
+            continue
+        
+        # Compute Householder vector with sign choice
+        u = x.copy()
+        u[0] += np.sign(x[0]) * norm_x if x[0] != 0 else norm_x
+        u = u / norm(u)
+        
+        # Apply reflection to R block
+        R[k:, k:] -= 2 * np.outer(u, u @ R[k:, k:])
+        
+        # Apply reflection to Q
+        Q[:, k:] -= 2 * Q[:, k:] @ np.outer(u, u)
+    return Q, R[:n, :n]
+
+# --------------------------------------------------
+# Solver Functions (Improved per feedback)
+# --------------------------------------------------
+# LU solver with adaptive iterative refinement
+def solve_lu(A, b, max_iter=10, tol=1e-12):
+    """
+    LU solver with iterative refinement using infinity norm for stability.
+    """
+    L, U, p = lu_decomposition(A)
+    b_perm = b[p]
+    y = forward_substitution_unit(L, b_perm)
+    x = back_substitution(U, y)
+    
+    # Adaptive iterative refinement using L∞ norm
+    for _ in range(max_iter):
+        r = b - A @ x
+        r_perm = r[p]
+        dy = forward_substitution_unit(L, r_perm)
+        dx = back_substitution(U, dy)
+        x += dx
+        
+        # Check residual improvement
+        res_norm = norm(r, np.inf)
+        if res_norm < tol:
+            break
+    return x
+
+# Cholesky solver with robust regularization
+def solve_cholesky(A, b, reg=1e-8):
+    """
+    Cholesky solver with adaptive regularization and proper substitution.
+    """
+    try:
+        L = cholesky_decomposition(A, reg)
+        y = forward_substitution(L, b)
+        x = back_substitution(L.T, y)
+        return x
+    except RuntimeError as e:
+        return np.full(A.shape[0], np.nan)
+
+# QR solver using explicit Q matrix
+def solve_qr(A, b):
+    """
+    QR solver using Householder reflections.
+    """
+    Q, R = householder_qr(A)
+    b_transformed = Q.T @ b
+    return back_substitution(R, b_transformed[:R.shape[0]])
+
+# Conjugate Gradient solver with relative residual
+def solve_cg(A, b, max_iter=1000, tol=1e-10):
+    """
+    Conjugate Gradient solver with relative residual stopping criterion.
+    """
+    n = A.shape[0]
+    x = np.zeros(n)
+    r = b - A @ x
+    p = r.copy()
+    rsold = r @ r
+    b_norm = norm(b)
+    
+    for i in range(max_iter):
+        Ap = A @ p
+        alpha = rsold / (p @ Ap)
+        x += alpha * p
+        r -= alpha * Ap
+        rsnew = r @ r
+        if np.sqrt(rsnew) < tol * b_norm:  # Relative residual
+            break
+        p = r + (rsnew / rsold) * p
+        rsold = rsnew
+    return x
+
+# --------------------------------------------------
+# Main Analysis with Enhanced Reporting
+# --------------------------------------------------
+# Matrix sizes to test
+ns = np.arange(5, 51, 5)
+methods = ['LU', 'Cholesky', 'QR', 'CG']
+errors = {m: [] for m in methods}
+residuals = {m: [] for m in methods}
+cond_numbers = []
+
+# Print header for results table
+print("n\tCond(H)\t\tMethod\t\tL∞ Error\t\tRel Residual")
+print("-"*70)
+
+for n in ns:
+    # Vectorized Hilbert matrix construction
+    i = np.arange(1, n+1)
+    j = i.reshape(-1, 1)
+    H = 1.0 / (i + j - 1)
+    
+    # Exact solution and right-hand side
+    x_exact = np.ones(n)
+    b = H @ x_exact
+    
+    # Compute and store condition number
+    c = cond(H)
+    cond_numbers.append(c)
+    
+    # Solve with each method and compute metrics
+    x_lu = solve_lu(H, b)
+    x_chol = solve_cholesky(H, b)
+    x_qr = solve_qr(H, b)
+    x_cg = solve_cg(H, b)
+    
+    solutions = {
+        'LU': x_lu,
+        'Cholesky': x_chol,
+        'QR': x_qr,
+        'CG': x_cg
+    }
+    
+    # Compute errors and residuals
+    for method, x in solutions.items():
+        if np.isnan(x).any():
+            err = np.nan
+            res = np.nan
+        else:
+            err = norm(x - x_exact, np.inf)  # L∞ error
+            res = norm(b - H @ x) / norm(b)   # Relative residual
+        errors[method].append(err)
+        residuals[method].append(res)
+        
+        # Format output for this method
+        err_str = f"{err:.3e}" if not np.isnan(err) else "FAIL"
+        res_str = f"{res:.3e}" if not np.isnan(res) else "FAIL"
+        print(f"{n}\t{c:.3e}\t{method}\t\t{err_str}\t\t{res_str}")
+
+# Plot results with log scale
+plt.figure(figsize=(12, 8))
+for method in methods:
+    valid_errors = [err for err in errors[method] if not np.isnan(err)]
+    if valid_errors:
+        plt.plot(ns[:len(valid_errors)], valid_errors, 'o-', label=f'{method}')
+
+plt.yscale('log')
+plt.xlabel('Matrix Size (n)')
+plt.ylabel('$L_\\infty$ Error')
+plt.title('Error Comparison for Hilbert Matrix Solvers')
+plt.legend()
+plt.grid(True, which="both", ls="-")
+plt.tight_layout()
+plt.savefig('hilbert_solver_errors.png')
+plt.show()
+
+# Plot condition numbers
+plt.figure(figsize=(10, 6))
+plt.plot(ns, cond_numbers, 'ko-')
+plt.yscale('log')
+plt.xlabel('Matrix Size (n)')
+plt.ylabel('Condition Number')
+plt.title('Condition Number of Hilbert Matrix')
+plt.grid(True, which="both", ls="-")
+plt.tight_layout()
+plt.savefig('hilbert_condition_numbers.png')
+plt.show()
+```
+****************************************

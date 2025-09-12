@@ -1,0 +1,185 @@
+
+****************************************
+**Expanded Context:**
+
+The problem involves solving a linear system \( H_n x = b \), where \( H_n \) is the \( n \times n \) Hilbert matrix defined by entries
+
+\[
+h_{ij} = \frac{1}{i + j - 1}, \quad 1 \leq i,j \leq n,
+\]
+
+and \( b \) is chosen such that the exact solution is the vector \( x = (1, 1, \ldots, 1)^T \). The Hilbert matrix is a classical example in numerical linear algebra known for being extremely ill-conditioned as \( n \) grows, which makes solving systems involving it a challenging task. The ill-conditioning means that small perturbations in \( b \) or rounding errors can cause large errors in the computed solution \( \hat{x} \).
+
+The goal is to implement from scratch various numerical methods to solve this system accurately and efficiently, and to compare the maximum norm (infinity norm) error
+
+\[
+\| \hat{x} - x \|_\infty = \max_i | \hat{x}_i - 1 |
+\]
+
+for increasing matrix sizes \( n = 5, 10, 15, \ldots, 50 \). The methods should be implemented using only numpy, scipy, and matplotlib, and the error should be kept sufficiently small despite the ill-conditioning.
+
+The requirement to implement methods "from scratch" means avoiding high-level functions like `numpy.linalg.solve` or `scipy.linalg.lu` for the core solution process. Instead, the underlying algorithms (e.g., iterative updates) must be coded manually using basic `numpy` array operations.
+
+This problem is a classical testbed for numerical linear algebra algorithms, highlighting issues of numerical stability, conditioning, and the effectiveness of different solution techniques. It also provides an opportunity to explore direct methods, iterative methods, and regularization techniques.
+
+---
+
+**Detailed Solution Plans:**
+
+---
+
+### Plan 1: Direct Methods Using LU Decomposition with Partial Pivoting
+
+- **Description:**  
+  Implement LU decomposition with partial pivoting from scratch (or use `scipy.linalg.lu_factor` and `lu_solve` for verification). The pivoting is crucial to maintain numerical stability.  
+- **Steps:**  
+  1. Construct \( H_n \) using the formula.  
+  2. Construct \( b = H_n \times \mathbf{1} \) to ensure exact solution \( x = \mathbf{1} \).  
+  3. Implement LU factorization with partial pivoting:  
+     - Decompose \( H_n = P L U \), where \( P \) is a permutation matrix, \( L \) is lower triangular with unit diagonal, and \( U \) is upper triangular.  
+  4. Solve \( L y = P b \) by forward substitution.  
+  5. Solve \( U x = y \) by backward substitution.  
+  6. Compute the infinity norm error between computed \( x \) and exact \( \mathbf{1} \).  
+- **Advantages:**  
+  - Direct method, exact in exact arithmetic.  
+  - Partial pivoting improves numerical stability.  
+- **Challenges:**  
+  - Ill-conditioning of \( H_n \) causes large errors for large \( n \).  
+  - Implementation complexity for pivoting and substitution.  
+- **Expected outcome:**  
+  - Small errors for small \( n \), increasing errors for larger \( n \).  
+  - Useful baseline for comparison.
+
+---
+
+### Plan 2: Cholesky Decomposition (Exploiting Symmetry and Positive Definiteness)
+
+- **Description:**  
+  The Hilbert matrix is symmetric and positive definite. Use Cholesky decomposition \( H_n = L L^T \) to solve the system.  
+- **Steps:**  
+  1. Construct \( H_n \) and \( b \) as before.  
+  2. Implement Cholesky decomposition from scratch:  
+     - Compute lower triangular \( L \) such that \( H_n = L L^T \).  
+  3. Solve \( L y = b \) by forward substitution.  
+  4. Solve \( L^T x = y \) by backward substitution.  
+  5. Compute the infinity norm error.  
+- **Advantages:**  
+  - Exploits matrix properties for efficiency.  
+  - Numerically more stable than LU without pivoting.  
+- **Challenges:**  
+  - Still sensitive to ill-conditioning.  
+  - Implementation requires careful handling of square roots and zero pivots.  
+- **Expected outcome:**  
+  - Improved accuracy over naive LU without pivoting.  
+  - Errors grow with \( n \), but possibly smaller than Plan 1.
+
+---
+
+### Plan 3: Using QR Decomposition via Gram-Schmidt or Householder Reflections
+
+- **Description:**  
+  Solve \( H_n x = b \) by QR factorization \( H_n = Q R \), where \( Q \) is orthogonal and \( R \) is upper triangular.  
+- **Steps:**  
+  1. Construct \( H_n \) and \( b \).  
+  2. Implement QR decomposition from scratch:  
+     - Classical or Modified Gram-Schmidt (less stable).  
+     - Prefer Householder reflections for numerical stability.  
+  3. Compute \( y = Q^T b \).  
+  4. Solve \( R x = y \) by backward substitution.  
+  5. Compute infinity norm error.  
+- **Advantages:**  
+  - Numerically stable orthogonal factorization.  
+  - Avoids squaring condition number as in normal equations.  
+- **Challenges:**  
+  - More computationally expensive than LU or Cholesky.  
+  - Implementation complexity for Householder reflections.  
+- **Expected outcome:**  
+  - Good accuracy for moderate \( n \).  
+  - Errors smaller than naive LU, comparable or better than Cholesky.
+
+---
+
+### Plan 4: Iterative Methods with Preconditioning
+
+- **Description:**  
+  Use iterative solvers such as Conjugate Gradient (CG) since \( H_n \) is symmetric positive definite. Preconditioning can improve convergence.  
+- **Steps:**  
+  1. Construct \( H_n \) and \( b \).  
+  2. Implement Conjugate Gradient method from scratch.  
+  3. Use Jacobi or incomplete Cholesky preconditioner to accelerate convergence.  
+  4. Iterate until residual norm is below a tolerance.  
+  5. Compute infinity norm error.  
+- **Advantages:**  
+  - Scalable to large \( n \).  
+  - Can handle ill-conditioning better with preconditioning.  
+- **Challenges:**  
+  - Requires careful stopping criteria.  
+  - Preconditioner implementation complexity.  
+- **Expected outcome:**  
+  - Accurate solutions for moderate \( n \).  
+  - May struggle for very large \( n \) without advanced preconditioning.
+
+---
+
+### Plan 5: Regularization Techniques (Tikhonov Regularization)
+
+- **Description:**  
+  Due to ill-conditioning, solve a regularized system
+
+  \[
+  (H_n^T H_n + \lambda I) x = H_n^T b,
+  \]
+
+  where \( \lambda > 0 \) is a small regularization parameter.  
+- **Steps:**  
+  1. Construct \( H_n \), \( b \), and exact \( x \).  
+  2. Choose a small \( \lambda \) (e.g., \( 10^{-8} \)).  
+  3. Form the regularized normal equations.  
+  4. Solve using Cholesky or QR decomposition.  
+  5. Compute infinity norm error.  
+- **Advantages:**  
+  - Stabilizes solution against ill-conditioning.  
+  - Reduces error growth for large \( n \).  
+- **Challenges:**  
+  - Introduces bias; solution no longer exact.  
+  - Choice of \( \lambda \) critical.  
+- **Expected outcome:**  
+  - Smaller errors for large \( n \) compared to direct methods.  
+  - Slight deviation from exact solution vector.
+
+---
+
+### Plan 6: Using High-Precision Arithmetic (via `mpmath` extended precision)
+
+- **Description:**  
+  Implement solution methods using higher precision arithmetic to reduce rounding errors.  
+- **Steps:**  
+  1. Construct \( H_n \) and \( b \) in high precision.  
+  2. Implement LU or Cholesky decomposition in high precision.  
+  3. Solve system and compute error.  
+- **Advantages:**  
+  - Reduces numerical errors due to floating point limitations.  
+- **Challenges:**  
+  - Not allowed if restricted to numpy/scipy only (which use double precision).  
+  - Computationally expensive.  
+- **Expected outcome:**  
+  - Significantly reduced errors for large \( n \).  
+  - Useful for benchmarking.
+
+---
+
+### Summary Table of Methods
+
+| Plan | Method                      | Stability          | Complexity       | Expected Accuracy | Notes                          |
+|-------|-----------------------------|--------------------|------------------|-------------------|-------------------------------|
+| 1     | LU with Partial Pivoting     | Moderate           | \(O(n^3)\)       | Moderate          | Baseline direct method         |
+| 2     | Cholesky Decomposition       | Better (SPD)       | \(O(n^3/3)\)     | Better than LU    | Exploits symmetry              |
+| 3     | QR Decomposition (Householder) | High               | \(O(2n^3/3)\)    | High              | Numerically stable             |
+| 4     | Iterative (CG + Preconditioning) | High (if preconditioned) | \(O(n^2 k)\) (k iterations) | Good for large \( n \) | Requires preconditioner        |
+| 5     | Regularization (Tikhonov)   | Stabilizes ill-conditioning | \(O(n^3)\)       | Good for large \( n \) | Introduces bias                |
+| 6     | High-Precision Arithmetic    | Very High          | Very High        | Very High         | Not feasible with numpy/scipy only |
+
+---
+
+This expanded context and detailed solution plans provide a comprehensive framework for implementing and comparing various numerical methods to solve the Hilbert system accurately and efficiently.
+****************************************

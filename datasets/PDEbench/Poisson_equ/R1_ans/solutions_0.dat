@@ -1,0 +1,160 @@
+
+****************************************
+To solve the 2D Laplace equation on a complex domain (a square with four circular holes) using finite differences, we implement a Cartesian grid approach with ghost points for boundary conditions. The solution involves:
+
+1. **Problem Analysis**:
+   - Laplace equation: \(-\Delta u = 0\)
+   - Domain: Square \([-0.5, 0.5]^2\) minus four circular holes of radius 0.1
+   - Boundary conditions: 
+     - \(u = 1\) on outer square boundary
+     - \(u = 0\) on hole boundaries
+
+2. **Algorithm Selection**:
+   - **Finite Difference Method (FDM)** with 5-point stencil for Laplacian
+   - Mask inactive points (holes and outer boundary)
+   - Solve sparse linear system using Conjugate Gradient method
+   - Use absolute tolerance (`atol`) for solver convergence
+
+3. **Implementation Highlights**:
+   - Grid generation with uniform spacing
+   - Masking holes using geometric criteria
+   - Constructing sparse matrix using COO format
+   - Applying boundary conditions via RHS modifications
+   - Solving linear system with SciPy's CG solver
+   - Visualization with contour plot and hole markers
+
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib.pyplot as plt
+
+# Define problem parameters
+N = 100  # Grid points per dimension
+r = 0.1  # Hole radius
+circles = [(0.3, 0.3), (-0.3, 0.3), (0.3, -0.3), (-0.3, -0.3)]
+
+# Create computational grid
+x = np.linspace(-0.5, 0.5, N)
+y = np.linspace(-0.5, 0.5, N)
+X, Y = np.meshgrid(x, y, indexing='ij')
+h = x[1] - x[0]  # Grid spacing
+
+# Initialize solution array
+u = np.zeros((N, N))
+
+# Identify hole regions
+hole_mask = np.zeros((N, N), dtype=bool)
+for cx, cy in circles:
+    hole_mask |= (X - cx)**2 + (Y - cy)**2 <= r**2
+
+# Identify outer boundary
+outer_mask = np.zeros((N, N), dtype=bool)
+outer_mask[0, :] = True
+outer_mask[-1, :] = True
+outer_mask[:, 0] = True
+outer_mask[:, -1] = True
+
+# Apply boundary conditions
+u[outer_mask] = 1.0  # Outer boundary = 1
+u[hole_mask] = 0.0    # Hole regions = 0
+
+# Create active point mask (points to solve for)
+fixed_mask = hole_mask | outer_mask
+active_mask = ~fixed_mask
+n_active = np.sum(active_mask)
+
+# Map active points to 1D indices
+idx = np.full((N, N), -1, dtype=int)
+active_points = np.argwhere(active_mask)
+for count, (i, j) in enumerate(active_points):
+    idx[i, j] = count
+
+# Build sparse matrix (COO format)
+row_indices = []
+col_indices = []
+data = []
+b = np.zeros(n_active)
+
+# Assemble linear system
+for count, (i, j) in enumerate(active_points):
+    # Diagonal element (4/h² coefficient)
+    row_indices.append(count)
+    col_indices.append(count)
+    data.append(4.0)
+    
+    # Process neighbors (left, right, top, bottom)
+    for di, dj in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+        ni, nj = i + di, j + dj
+        if 0 <= ni < N and 0 <= nj < N:
+            neighbor_idx = idx[ni, nj]
+            if neighbor_idx >= 0:  # Active neighbor
+                row_indices.append(count)
+                col_indices.append(neighbor_idx)
+                data.append(-1.0)
+            else:  # Fixed neighbor (boundary)
+                b[count] += u[ni, nj]
+
+# Create sparse matrix and solve
+A = sp.coo_matrix((data, (row_indices, col_indices)), shape=(n_active, n_active))
+A_csr = A.tocsr()
+solution, info = spla.cg(A_csr, b, atol=1e-6, maxiter=2000)
+
+# Update solution array
+u[active_mask] = solution
+
+# Print solver diagnostics
+print(f"Number of active points: {n_active}")
+print(f"Solver convergence info: {info}")
+residual_norm = np.linalg.norm(A_csr @ solution - b)
+print(f"Residual norm: {residual_norm:.6e}")
+
+# Prepare plot data (set holes to NaN)
+u_plot = np.where(hole_mask, np.nan, u)
+
+# Create contour plot
+plt.figure(figsize=(8, 6))
+contour = plt.contourf(X, Y, u_plot, levels=50, cmap='jet')
+plt.colorbar(contour, label='Solution value')
+plt.title('Solution to Laplace Equation with Circular Holes')
+
+# Mark hole boundaries
+for cx, cy in circles:
+    circle = plt.Circle((cx, cy), r, color='black', fill=False, linewidth=1)
+    plt.gca().add_patch(circle)
+
+plt.axis('equal')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.tight_layout()
+plt.savefig('poisson_2d_solution.png')
+```
+
+**Key Technical Points**:
+1. **Grid Handling**:
+   - Uniform Cartesian grid with spacing `h`
+   - Boolean masks for holes and boundaries
+   - Active points identified for solving
+
+2. **Sparse Matrix Construction**:
+   - COO format for efficient assembly
+   - 5-point stencil coefficients (4 for center, -1 for neighbors)
+   - Boundary contributions moved to RHS
+
+3. **Solver Configuration**:
+   - Conjugate Gradient method (symmetric positive definite systems)
+   - Absolute tolerance (`atol=1e-6`) for convergence
+   - Maximum iterations to prevent divergence
+
+4. **Visualization**:
+   - `jet` colormap for solution contours
+   - Circular patches for hole boundaries
+   - `savefig()` for output (no `plt.show()`)
+
+**Output Information**:
+- Active point count (problem size)
+- Solver convergence status
+- Residual norm for solution verification
+
+The solution efficiently handles complex geometry through masked grid points while maintaining numerical accuracy. The contour plot clearly shows the solution distribution with hole boundaries marked.
+****************************************

@@ -1,0 +1,375 @@
+
+****************************************
+```python
+# Technical explanation for the solving algorithm
+# The problem involves solving the 2D steady incompressible Navier-Stokes equations,
+# which are a set of coupled non-linear partial differential equations for velocity (u, v)
+# and pressure (p). The incompressibility constraint (divergence-free velocity) makes
+# the system challenging to solve directly due to the lack of a time derivative for pressure.
+#
+# The Artificial Compressibility Method (ACM) is employed here to overcome this challenge.
+# This method introduces a pseudo-time derivative of pressure into the continuity equation,
+# effectively transforming the steady incompressible system into a time-dependent,
+# compressible-like system that can be marched in pseudo-time (tau) until a steady state
+# is reached. As the solution converges to a steady state (i.e., the pseudo-time derivatives
+# approach zero), the original incompressible Navier-Stokes equations are recovered.
+#
+# The modified system of equations solved iteratively in pseudo-time is:
+# 1. Momentum in x-direction:
+#    ∂u/∂τ = - (u ∂u/∂x + v ∂u/∂y) - ∂p/∂x + (1/Re) (∂²u/∂x² + ∂²u/∂y²)
+# 2. Momentum in y-direction:
+#    ∂v/∂τ = - (u ∂v/∂x + v ∂v/∂y) - ∂p/∂y + (1/Re) (∂²v/∂x² + ∂²v/∂y²)
+# 3. Artificial Continuity (Pressure Evolution):
+#    ∂p/∂τ = - β (∂u/∂x + ∂v/∂y)
+#
+# Here, 'τ' is the artificial time, and 'β' is the artificial compressibility parameter,
+# which controls the rate at which the pressure field adjusts to satisfy the continuity
+# equation. A common choice for β is 1.0.
+#
+# Spatial discretization is performed using finite differences on a uniform Cartesian grid.
+# Second-order central finite differences are used for pressure gradients and diffusion terms.
+# For convection terms, an optional first-order upwind scheme is provided to enhance stability,
+# especially at higher Reynolds numbers or for convection-dominated flows. By default,
+# second-order central differencing is used for convection, which is generally acceptable
+# for Re=100 due to its higher accuracy.
+#
+# The time marching is done using an explicit Euler scheme for simplicity. At each
+# pseudo-time step, the momentum equations are updated first using the current
+# velocity and pressure fields. Then, the pressure equation is updated using the
+# newly computed (intermediate) velocity field to enforce the incompressibility
+# constraint. Boundary conditions are applied after each update step for the
+# respective fields.
+#
+# Convergence is monitored by tracking the maximum absolute change in the velocity
+# and pressure fields between successive pseudo-time steps. The iteration stops
+# when this change falls below a predefined tolerance or a maximum number of iterations
+# is reached.
+#
+# Boundary conditions are applied as follows:
+# - Velocity: No-slip conditions (u=0, v=0) are enforced on the left, right, and
+#   bottom boundaries. On the top boundary, a parabolic velocity profile
+#   (u = αx(1-x), v = 0) is imposed, where α=2.
+# - Pressure: A reference pressure p(0,0)=0 is set to fix the absolute pressure level.
+#   Zero normal pressure gradient (∂p/∂n=0) is applied on all boundaries. This is
+#   implemented by setting the pressure at a boundary grid point equal to the
+#   pressure at its adjacent interior grid point.
+#
+# Note on Pressure-Velocity Coupling: This implementation uses a collocated grid.
+# For more complex flows or finer grids, explicit pressure-velocity coupling techniques
+# (e.g., Rhie-Chow interpolation or a staggered grid arrangement) might be necessary
+# to prevent pressure checkerboarding or spurious oscillations. For Re=100, this
+# is often not a severe issue.
+
+# Optimized parts based on teacher feedback:
+# 1. Modularization: Spatial derivative calculations and convection terms are now
+#    encapsulated into dedicated functions (`calculate_convection_terms`,
+#    `calculate_pressure_gradients`, `calculate_laplacian`, `calculate_divergence`).
+#    This significantly improves code readability, maintainability, and reduces
+#    redundancy within the main iteration loop.
+# 2. Adaptive Pseudo-Time Step (`dt_tau`): Instead of a fixed `dt_tau`, the code
+#    now dynamically calculates `dt_tau` at each iteration based on CFL-like
+#    conditions for both convection and diffusion. This helps in achieving faster
+#    convergence by allowing larger stable time steps when possible, while ensuring
+#    numerical stability. A `CFL_safety_factor` and `max_dt_tau_limit` are introduced
+#    for fine-tuning and robustness. The history of `dt_tau` is also plotted.
+# 3. Optional Upwind Convection: An option (`use_upwind_convection`) has been added
+#    to switch between second-order central differencing (default) and first-order
+#    upwind differencing for the convection terms. This addresses the feedback
+#    regarding stability for convection-dominated flows, providing a more robust
+#    alternative if needed.
+# 4. Enhanced Plotting Filenames: Plot filenames now include more descriptive
+#    information (e.g., Reynolds number, grid dimensions) to facilitate easier
+#    identification and comparison of results from different simulation runs.
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Parameters ---
+Nx = 51  # Number of grid points in x-direction
+Ny = 51  # Number of grid points in y-direction
+Re = 100.0  # Reynolds number
+alpha = 2.0  # Parameter for top boundary velocity profile
+beta = 1.0  # Artificial compressibility parameter
+
+dx = 1.0 / (Nx - 1)  # Grid spacing in x
+dy = 1.0 / (Ny - 1)  # Grid spacing in y
+
+# Pseudo-time step (dt_tau) parameters for adaptive time stepping
+CFL_safety_factor = 0.8 # Safety factor for CFL condition (0.8 is a common starting point)
+max_dt_tau_limit = 0.01 # Upper limit for dt_tau to prevent excessively large steps, especially at low velocities
+
+max_iter = 100000  # Maximum number of pseudo-time iterations
+tol = 1e-5  # Convergence tolerance for the maximum absolute change in fields
+
+use_upwind_convection = False # Set to True to use first-order upwind for convection, False for central differencing
+
+# --- Grid Generation ---
+x = np.linspace(0, 1, Nx)
+y = np.linspace(0, 1, Ny)
+X, Y = np.meshgrid(x, y) # For plotting
+
+# --- Initialize Fields ---
+u = np.zeros((Ny, Nx))  # u-velocity component
+v = np.zeros((Ny, Nx))  # v-velocity component
+p = np.zeros((Ny, Nx))  # Pressure
+
+# --- Apply Initial Boundary Conditions for Velocity ---
+# Top boundary (y=1, j=Ny-1): u = alpha*x*(1-x), v = 0
+u[Ny - 1, :] = alpha * x * (1 - x)
+v[Ny - 1, :] = 0.0
+# Other boundaries (left, right, bottom): u = 0, v = 0 (already initialized to zero)
+
+# --- Functions for applying boundary conditions ---
+def apply_velocity_bcs(u_field, v_field, x_coords, alpha_val, Nx_grid, Ny_grid):
+    # Top boundary (y=1, j=Ny-1)
+    u_field[Ny_grid - 1, :] = alpha_val * x_coords * (1 - x_coords)
+    v_field[Ny_grid - 1, :] = 0.0
+    # Bottom boundary (y=0, j=0)
+    u_field[0, :] = 0.0
+    v_field[0, :] = 0.0
+    # Left boundary (x=0, i=0)
+    u_field[:, 0] = 0.0
+    v_field[:, 0] = 0.0
+    # Right boundary (x=1, i=Nx-1)
+    u_field[:, Nx_grid - 1] = 0.0
+    v_field[:, Nx_grid - 1] = 0.0
+
+def apply_pressure_bcs(p_field, Nx_grid, Ny_grid):
+    # Zero normal pressure gradient (dp/dn = 0)
+    # This is implemented by setting pressure at boundary equal to pressure at adjacent interior point.
+    # Bottom boundary (j=0)
+    p_field[0, :] = p_field[1, :]
+    # Top boundary (j=Ny-1)
+    p_field[Ny_grid - 1, :] = p_field[Ny_grid - 2, :]
+    # Left boundary (i=0)
+    p_field[:, 0] = p_field[:, 1]
+    # Right boundary (i=Nx-1)
+    p_field[:, Nx_grid - 1] = p_field[:, Nx_grid - 2]
+    
+    # Reference pressure: p(x=0,y=0) = 0
+    # This must be applied after other pressure BCs to ensure it's fixed.
+    p_field[0, 0] = 0.0
+
+# --- Functions for calculating spatial derivatives ---
+def calculate_pressure_gradients(p_field, dx, dy):
+    # Pressure gradient terms (dp/dx, dp/dy) using central differences
+    dpdx = (p_field[1:-1, 2:] - p_field[1:-1, 0:-2]) / (2 * dx)
+    dpdy = (p_field[2:, 1:-1] - p_field[0:-2, 1:-1]) / (2 * dy)
+    return dpdx, dpdy
+
+def calculate_laplacian(field, dx, dy):
+    # Diffusion terms (Laplacian: d^2/dx^2 + d^2/dy^2) using central differences
+    laplacian = (field[1:-1, 2:] - 2 * field[1:-1, 1:-1] + field[1:-1, 0:-2]) / dx**2 + \
+                (field[2:, 1:-1] - 2 * field[1:-1, 1:-1] + field[0:-2, 1:-1]) / dy**2
+    return laplacian
+
+def calculate_convection_terms(u_field, v_field, dx, dy, use_upwind):
+    # Convection terms (u * du/dx + v * du/dy)
+    u_interior = u_field[1:-1, 1:-1]
+    v_interior = v_field[1:-1, 1:-1]
+
+    if use_upwind:
+        # First-order upwind differencing for convection terms
+        # du/dx
+        du_dx = np.zeros_like(u_interior)
+        # If u_interior >= 0, use backward difference (u_i - u_{i-1})/dx
+        du_dx[u_interior >= 0] = (u_interior[u_interior >= 0] - u_field[1:-1, 0:-2][u_interior >= 0]) / dx
+        # If u_interior < 0, use forward difference (u_{i+1} - u_i)/dx
+        du_dx[u_interior < 0] = (u_field[1:-1, 2:][u_interior < 0] - u_interior[u_interior < 0]) / dx
+        
+        # du/dy
+        du_dy = np.zeros_like(u_interior)
+        # If v_interior >= 0, use backward difference (u_j - u_{j-1})/dy
+        du_dy[v_interior >= 0] = (u_interior[v_interior >= 0] - u_field[0:-2, 1:-1][v_interior >= 0]) / dy
+        # If v_interior < 0, use forward difference (u_{j+1} - u_j)/dy
+        du_dy[v_interior < 0] = (u_field[2:, 1:-1][v_interior < 0] - u_interior[v_interior < 0]) / dy
+
+        # dv/dx
+        dv_dx = np.zeros_like(u_interior)
+        # If u_interior >= 0, use backward difference (v_i - v_{i-1})/dx
+        dv_dx[u_interior >= 0] = (v_interior[u_interior >= 0] - v_field[1:-1, 0:-2][u_interior >= 0]) / dx
+        # If u_interior < 0, use forward difference (v_{i+1} - v_i)/dx
+        dv_dx[u_interior < 0] = (v_field[1:-1, 2:][u_interior < 0] - v_interior[u_interior < 0]) / dx
+
+        # dv/dy
+        dv_dy = np.zeros_like(u_interior)
+        # If v_interior >= 0, use backward difference (v_j - v_{j-1})/dy
+        dv_dy[v_interior >= 0] = (v_interior[v_interior >= 0] - v_field[0:-2, 1:-1][v_interior >= 0]) / dy
+        # If v_interior < 0, use forward difference (v_{j+1} - v_j)/dy
+        dv_dy[v_interior < 0] = (v_field[2:, 1:-1][v_interior < 0] - v_interior[v_interior < 0]) / dy
+
+    else:
+        # Second-order central differencing for convection terms
+        du_dx = (u_field[1:-1, 2:] - u_field[1:-1, 0:-2]) / (2 * dx)
+        du_dy = (u_field[2:, 1:-1] - u_field[0:-2, 1:-1]) / (2 * dy)
+        dv_dx = (v_field[1:-1, 2:] - v_field[1:-1, 0:-2]) / (2 * dx)
+        dv_dy = (v_field[2:, 1:-1] - v_field[0:-2, 1:-1]) / (2 * dy)
+
+    u_dudx = u_interior * du_dx
+    v_dudy = v_interior * du_dy
+    u_dvdx = u_interior * dv_dx
+    v_dvdy = v_interior * dv_dy
+
+    return u_dudx, v_dudy, u_dvdx, v_dvdy
+
+def calculate_divergence(u_field, v_field, dx, dy):
+    # Calculate divergence (continuity residual) using central differences
+    div_u = (u_field[1:-1, 2:] - u_field[1:-1, 0:-2]) / (2 * dx)
+    div_v = (v_field[2:, 1:-1] - v_field[0:-2, 1:-1]) / (2 * dy)
+    return div_u + div_v
+
+# --- Main Iteration Loop (Artificial Compressibility Method) ---
+print("Starting Artificial Compressibility Method iterations...")
+print(f"Grid: {Nx}x{Ny}, Re: {Re}, Tolerance: {tol:.1e}")
+print(f"Convection scheme: {'Upwind' if use_upwind_convection else 'Central Differencing'}")
+print(f"Adaptive dt_tau: CFL_safety_factor={CFL_safety_factor}, max_dt_tau_limit={max_dt_tau_limit}")
+
+# Store residuals and dt_tau for plotting convergence history
+residuals = []
+dt_tau_history = []
+
+for it in range(max_iter):
+    u_old = u.copy()
+    v_old = v.copy()
+    p_old = p.copy()
+
+    # Calculate spatial derivatives for interior points (i from 1 to Nx-2, j from 1 to Ny-2)
+    # Convection terms
+    u_dudx, v_dudy, u_dvdx, v_dvdy = calculate_convection_terms(u_old, v_old, dx, dy, use_upwind_convection)
+
+    # Pressure gradient terms
+    dpdx, dpdy = calculate_pressure_gradients(p_old, dx, dy)
+
+    # Diffusion terms
+    laplacian_u = calculate_laplacian(u_old, dx, dy)
+    laplacian_v = calculate_laplacian(v_old, dx, dy)
+
+    # --- Update Momentum Equations (u and v) using Explicit Euler ---
+    # RHS of u-momentum equation (convection + pressure gradient + diffusion)
+    u_rhs = - (u_dudx + v_dudy) - dpdx + (1 / Re) * laplacian_u
+    # RHS of v-momentum equation
+    v_rhs = - (u_dvdx + v_dvdy) - dpdy + (1 / Re) * laplacian_v
+
+    # Calculate adaptive dt_tau based on CFL conditions
+    # Calculate velocity magnitude for CFL condition
+    velocity_magnitude_current = np.sqrt(u_old**2 + v_old**2)
+    # Add a small epsilon to avoid division by zero if velocities are initially all zero
+    max_vel_mag = np.max(velocity_magnitude_current) + 1e-10 
+
+    # Convective time step limit (CFL condition: dt <= C * dx / |u|)
+    dt_tau_conv = CFL_safety_factor * min(dx, dy) / max_vel_mag
+    
+    # Diffusive time step limit (for explicit Euler: dt <= 0.5 * Re * min(dx^2, dy^2))
+    dt_tau_diff = CFL_safety_factor * 0.5 * Re * min(dx**2, dy**2)
+
+    # Choose the minimum of the limits, and cap it by max_dt_tau_limit
+    current_dt_tau = min(dt_tau_conv, dt_tau_diff, max_dt_tau_limit)
+    dt_tau_history.append(current_dt_tau)
+
+    # Create new arrays for updated velocities to avoid modifying in-place during calculations
+    u_new = u_old.copy()
+    v_new = v_old.copy()
+    u_new[1:-1, 1:-1] = u_old[1:-1, 1:-1] + current_dt_tau * u_rhs
+    v_new[1:-1, 1:-1] = v_old[1:-1, 1:-1] + current_dt_tau * v_rhs
+
+    # Apply velocity boundary conditions to u_new and v_new
+    apply_velocity_bcs(u_new, v_new, x, alpha, Nx, Ny)
+
+    # --- Update Pressure Equation using Explicit Euler ---
+    # Calculate divergence (continuity residual) using the *updated* velocities (u_new, v_new)
+    # This ensures the pressure correction drives the new velocity field towards incompressibility.
+    divergence = calculate_divergence(u_new, v_new, dx, dy)
+
+    # Create new array for updated pressure
+    p_new = p_old.copy()
+    p_new[1:-1, 1:-1] = p_old[1:-1, 1:-1] - current_dt_tau * beta * divergence
+
+    # Apply pressure boundary conditions to p_new
+    apply_pressure_bcs(p_new, Nx, Ny)
+
+    # --- Check for Convergence ---
+    # Calculate maximum absolute change in u, v, p fields between current and previous step
+    max_change_u = np.max(np.abs(u_new - u_old))
+    max_change_v = np.max(np.abs(v_new - v_old))
+    max_change_p = np.max(np.abs(p_new - p_old))
+    max_residual = max(max_change_u, max_change_v, max_change_p)
+    residuals.append(max_residual)
+
+    # Update fields for the next iteration
+    u = u_new
+    v = v_new
+    p = p_new
+
+    # Print progress periodically
+    if it % 1000 == 0 or it == max_iter - 1:
+        print(f"Iteration {it:5d}, Max Residual: {max_residual:.8e}, dt_tau: {current_dt_tau:.4e}")
+
+    # Check if convergence criterion is met
+    if max_residual < tol:
+        print(f"\nConverged at iteration {it} with Max Residual: {max_residual:.8e}")
+        break
+else:
+    # This block executes if the loop completes without breaking (i.e., did not converge)
+    print(f"\nDid not converge within {max_iter} iterations. Final Max Residual: {max_residual:.8e}")
+
+# --- Detailed Result Printing ---
+print("\n--- Simulation Summary ---")
+print(f"Final Max Residual: {max_residual:.8e}")
+print(f"Total Iterations: {it + 1}")
+
+# Calculate velocity magnitude for post-processing
+velocity_magnitude = np.sqrt(u**2 + v**2)
+print(f"Maximum Velocity Magnitude: {np.max(velocity_magnitude):.4f}")
+print(f"Minimum Velocity Magnitude: {np.min(velocity_magnitude):.4f}")
+print(f"Maximum Pressure: {np.max(p):.4f}")
+print(f"Minimum Pressure: {np.min(p):.4f}")
+
+# --- Plotting Results ---
+# Plot convergence history
+plt.figure(figsize=(10, 6))
+plt.semilogy(residuals)
+plt.title('Convergence History (Max Absolute Change vs. Iteration)')
+plt.xlabel('Iteration')
+plt.ylabel('Max Absolute Change (log scale)')
+plt.grid(True)
+plt.savefig(f'convergence_history_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png', dpi=300)
+plt.close() # Close the plot to free memory
+
+# Plot dt_tau history
+plt.figure(figsize=(10, 6))
+plt.plot(dt_tau_history)
+plt.title('Adaptive Pseudo-Time Step (dt_tau) History')
+plt.xlabel('Iteration')
+plt.ylabel('dt_tau')
+plt.grid(True)
+plt.savefig(f'dt_tau_history_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png', dpi=300)
+plt.close()
+
+# Plot contours of velocity magnitude with streamlines
+plt.figure(figsize=(10, 8))
+# Contour plot of velocity magnitude
+contour = plt.contourf(X, Y, velocity_magnitude, levels=50, cmap='jet')
+plt.colorbar(contour, label='Velocity Magnitude')
+# Streamlines of the velocity field
+plt.streamplot(X, Y, u, v, color='k', linewidth=0.8, density=1.5, arrowsize=1.5)
+plt.title(f'Velocity Magnitude Contours and Streamlines (Re={int(Re)}, {Nx}x{Ny} Grid)')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.gca().set_aspect('equal', adjustable='box') # Ensure aspect ratio is 1:1
+plt.savefig(f'velocity_magnitude_streamlines_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png', dpi=300)
+plt.close()
+
+# Plot pressure contours
+plt.figure(figsize=(10, 8))
+pressure_contour = plt.contourf(X, Y, p, levels=50, cmap='jet')
+plt.colorbar(pressure_contour, label='Pressure')
+plt.title(f'Pressure Contours (Re={int(Re)}, {Nx}x{Ny} Grid)')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.gca().set_aspect('equal', adjustable='box')
+plt.savefig(f'pressure_contours_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png', dpi=300)
+plt.close()
+
+print(f"\nPlots saved: convergence_history_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png, dt_tau_history_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png, velocity_magnitude_streamlines_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png, pressure_contours_Re{int(Re)}_Nx{Nx}_Ny{Ny}.png")
+```
+****************************************

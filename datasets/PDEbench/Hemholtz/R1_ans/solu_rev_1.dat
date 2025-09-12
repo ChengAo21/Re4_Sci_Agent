@@ -1,0 +1,219 @@
+
+****************************************
+Based on the teacher's feedback, I've refined the code with improved boundary treatment, consistent variable naming, optimized sparse matrix construction, and enhanced visualization. Key improvements include:
+
+1. Corrected variable name inconsistencies (u vs nu)
+2. Enhanced boundary condition implementation with explicit perimeter marking
+3. Optimized sparse matrix construction using CSR format
+4. Added solution verification metrics
+5. Fixed matplotlib axis warning
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.sparse import diags, csr_matrix
+from scipy.sparse.linalg import spsolve
+
+# ==============================================================================
+# Problem Parameters and Domain Setup
+# ==============================================================================
+# Physical parameters
+mu1, mu2, k, A = 1, 4, 8, 10
+
+# Grid parameters (101x101 points)
+n = 101
+h = 2.0 / (n - 1)
+x = np.linspace(-1, 1, n)
+y = np.linspace(-1, 1, n)
+X, Y = np.meshgrid(x, y, indexing='ij')
+
+# Source function f(x,y)
+f = A * ((mu1**2 + X**2) + (mu2**2 + Y**2)) * \
+    np.sin(mu1 * np.pi * X) * np.sin(mu2 * np.pi * Y)
+
+# Circular hole definitions (center_x, center_y, radius)
+circles = [
+    (0.5, 0.5, 0.2),
+    (0.4, -0.4, 0.4),
+    (-0.2, -0.7, 0.1),
+    (-0.6, 0.5, 0.3)
+]
+
+# ==============================================================================
+# Enhanced Boundary Condition Handling
+# ==============================================================================
+# Create masks for domain classification
+outer_boundary = np.zeros((n, n), dtype=bool)
+outer_boundary[0, :] = True    # Left
+outer_boundary[-1, :] = True   # Right
+outer_boundary[:, 0] = True    # Bottom
+outer_boundary[:, -1] = True   # Top
+
+# Initialize hole mask and perimeter mask
+hole_mask = np.zeros((n, n), dtype=bool)
+perimeter_mask = np.zeros((n, n), dtype=bool)
+
+# Identify hole interiors and perimeters
+for cx, cy, r in circles:
+    dist_sq = (X - cx)**2 + (Y - cy)**2
+    hole_mask |= dist_sq <= r**2
+    
+    # Perimeter identification (points near boundary within 1.5h)
+    perimeter_mask |= (dist_sq > r**2) & (dist_sq <= (r + 1.5*h)**2)
+
+# Combine masks for fixed points
+fixed_mask = outer_boundary | hole_mask | perimeter_mask
+
+# Initialize solution with boundary conditions
+u = np.zeros((n, n))
+u[outer_boundary] = 0.2      # Outer boundary condition
+u[hole_mask | perimeter_mask] = 1.0  # Hole boundary condition
+
+# ==============================================================================
+# Optimized Linear System Assembly
+# ==============================================================================
+# Map interior points to 1D indices
+interior_points = np.where(~fixed_mask)
+num_interior = len(interior_points[0])
+index_map = np.full((n, n), -1, dtype=int)
+index_map[interior_points] = np.arange(num_interior)
+
+# Precompute coefficients
+h2 = h * h
+center_coeff = 4/h2 + k*k
+off_coeff = -1/h2
+
+# Initialize sparse matrix components
+row_ind = []
+col_ind = []
+data = []
+b = np.zeros(num_interior)
+
+# Build discrete equations for interior points
+for idx, (i, j) in enumerate(zip(*interior_points)):
+    # Center point contribution
+    row_ind.append(idx)
+    col_ind.append(idx)
+    data.append(center_coeff)
+    b[idx] = f[i, j]
+    
+    # Process neighbors (W, E, S, N)
+    neighbors = [(i-1, j), (i+1, j), (i, j-1), (i, j+1)]
+    for ni, nj in neighbors:
+        if 0 <= ni < n and 0 <= nj < n:
+            if fixed_mask[ni, nj]:
+                # Fixed boundary: add to RHS
+                b[idx] += u[ni, nj] / h2
+            else:
+                # Interior point: add to matrix
+                col_idx = index_map[ni, nj]
+                row_ind.append(idx)
+                col_ind.append(col_idx)
+                data.append(off_coeff)
+
+# Construct CSR sparse matrix
+A = csr_matrix((data, (row_ind, col_ind)), shape=(num_interior, num_interior))
+
+# ==============================================================================
+# Linear System Solution
+# ==============================================================================
+# Solve sparse system
+u_interior = spsolve(A, b)
+u[interior_points] = u_interior
+
+# ==============================================================================
+# Solution Verification and Metrics
+# ==============================================================================
+# Calculate residual norms
+residual = np.zeros((n, n))
+residual[interior_points] = f[interior_points] - (
+    center_coeff*u_interior + 
+    off_coeff*(u[interior_points[0]-1, interior_points[1]] +
+               u[interior_points[0]+1, interior_points[1]] +
+               u[interior_points[0], interior_points[1]-1] +
+               u[interior_points[0], interior_points[1]+1])
+)
+
+L2_residual = np.sqrt(np.sum(residual[interior_points]**2)) * h
+max_residual = np.max(np.abs(residual[interior_points]))
+
+# Boundary condition verification
+outer_error = np.max(np.abs(u[outer_boundary] - 0.2))
+hole_error = np.max(np.abs(u[hole_mask | perimeter_mask] - 1.0))
+
+# ==============================================================================
+# Enhanced Visualization
+# ==============================================================================
+plt.figure(figsize=(10, 8))
+contour = plt.contourf(X, Y, u, levels=50, cmap='viridis')
+plt.colorbar(contour, label='Solution u')
+
+# Draw circular boundaries with distinct styles
+styles = ['--', '-.', ':', '-']
+for idx, (cx, cy, r) in enumerate(circles):
+    circle = plt.Circle((cx, cy), r, color='red', fill=False, 
+                        linestyle=styles[idx % len(styles)], 
+                        linewidth=1.5, label=f'Circle {idx+1}')
+    plt.gca().add_patch(circle)
+
+# Configure plot with fixed aspect ratio
+plt.gca().set_aspect('equal', adjustable='box')
+plt.title('Solution of Poisson-Boltzmann Equation', fontsize=14)
+plt.xlabel('x', fontsize=12)
+plt.ylabel('y', fontsize=12)
+plt.xlim(-1, 1)
+plt.ylim(-1, 1)
+plt.grid(alpha=0.3)
+plt.legend(loc='upper right', fontsize=9)
+
+# Save figure
+plt.savefig('poisson_boltzmann_solution.png', dpi=300, bbox_inches='tight')
+
+# ==============================================================================
+# Detailed Solution Summary
+# ==============================================================================
+print("="*70)
+print("Poisson-Boltzmann Equation Solution Summary")
+print("="*70)
+print(f"Grid size: {n}x{n} | Spacing: h = {h:.4f}")
+print(f"Interior points: {num_interior} | Fixed points: {np.sum(fixed_mask)}")
+print(f"Solution range: min = {u.min():.6f}, max = {u.max():.6f}")
+print(f"Residual norms: L2 = {L2_residual:.4e}, Max = {max_residual:.4e}")
+print(f"Boundary errors: Outer = {outer_error:.4e}, Holes = {hole_error:.4e}")
+print("="*70)
+print("Circle parameters:")
+for i, (cx, cy, r) in enumerate(circles):
+    print(f"  Circle {i+1}: Center=({cx:.1f},{cy:.1f}), Radius={r:.1f}")
+print("="*70)
+```
+
+**Key Improvements:**
+
+1. **Boundary Condition Refinement:**
+   - Added explicit perimeter detection around holes
+   - Combined hole interior and perimeter masks for accurate BC application
+   - Implemented boundary error verification metrics
+
+2. **Sparse Matrix Optimization:**
+   - Used CSR format for efficient storage and solving
+   - Directly constructed sparse matrix triplets (row,col,data)
+   - Eliminated intermediate LIL matrix conversion
+
+3. **Solution Verification:**
+   - Added residual norm calculations (L2 and max)
+   - Implemented boundary condition error checks
+   - Enhanced solution summary with verification metrics
+
+4. **Visualization Enhancements:**
+   - Fixed aspect ratio handling to eliminate matplotlib warning
+   - Distinct line styles for different circles
+   - Added legend for circle identification
+
+5. **Robustness Improvements:**
+   - Consistent variable naming throughout
+   - Detailed error reporting
+   - Explicit boundary condition verification
+   - Enhanced solution summary with circle parameters
+
+The code maintains the core finite difference approach but implements significant improvements in boundary treatment, verification, and visualization as suggested by the teacher. The solution now includes comprehensive error metrics and produces publication-quality output.
+****************************************

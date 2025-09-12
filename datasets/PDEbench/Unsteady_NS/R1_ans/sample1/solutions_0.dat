@@ -1,0 +1,183 @@
+
+****************************************
+To solve the 2D unsteady incompressible Navier-Stokes equations with the specified boundary conditions, we implement the Projection Method (Chorin's method). This approach decouples velocity and pressure calculations, making it efficient for moderate Reynolds numbers (Re=100). The solution involves computing intermediate velocities, solving a pressure Poisson equation using GMRES, and correcting velocities while enforcing boundary conditions.
+
+### Technical Approach:
+1. **Spatial Discretization**: Second-order central differences for derivatives.
+2. **Temporal Discretization**: Explicit Euler time-stepping.
+3. **Pressure Solver**: GMRES with mixed Neumann/Dirichlet boundary conditions.
+4. **Boundary Handling**: 
+   - No-slip walls: Velocity set to zero.
+   - Inlet: Time-dependent velocity profile.
+   - Outlet: Zero pressure and zero normal velocity gradient.
+5. **Forcing Term**: Vertical force applied in the v-momentum equation.
+
+### Code Implementation:
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.sparse import lil_matrix, csr_matrix
+from scipy.sparse.linalg import gmres
+
+# Problem parameters
+Re = 100.0
+Lx, Ly = 2.0, 1.0
+T_total = 0.5
+nx, ny = 100, 50
+dx = Lx / (nx - 1)
+dy = Ly / (ny - 1)
+dt = 0.001
+nt = int(T_total / dt) + 1
+
+# Grid setup
+x = np.linspace(0, Lx, nx)
+y = np.linspace(0, Ly, ny)
+X, Y = np.meshgrid(x, y)
+
+# Initialize fields
+u = np.zeros((ny, nx))
+v = np.zeros((ny, nx))
+p = np.zeros((ny, nx))
+
+# Sparse matrix setup for Poisson equation
+n = ny * nx
+A = lil_matrix((n, n))
+
+# Build Poisson matrix with boundary conditions
+for i in range(ny):
+    for j in range(nx):
+        idx = i * nx + j
+        if j == nx - 1:  # Outlet: Dirichlet (p=0)
+            A[idx, idx] = 1.0
+        elif j == 0 or i == 0 or i == ny - 1:  # Neumann boundaries
+            A[idx, idx] = 1.0
+            if j == 0:  # Left boundary
+                A[idx, idx + 1] = -1.0
+            elif i == 0:  # Top boundary
+                A[idx, idx + nx] = -1.0
+            else:  # Bottom boundary
+                A[idx, idx - nx] = -1.0
+        else:  # Interior points
+            A[idx, idx] = -2.0/dx**2 - 2.0/dy**2
+            A[idx, idx - 1] = 1.0/dx**2
+            A[idx, idx + 1] = 1.0/dx**2
+            A[idx, idx - nx] = 1.0/dy**2
+            A[idx, idx + nx] = 1.0/dy**2
+
+A = A.tocsr()  # Convert to CSR for efficient solving
+
+# Time-stepping loop
+for n in range(nt):
+    t = n * dt
+    # Forcing term (vertical direction)
+    f_y = -np.sin(np.pi * X) * np.sin(np.pi * Y) * np.sin(np.pi * t)
+    
+    # Compute derivatives for convective terms
+    dudx = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2*dx)
+    dudy = (np.roll(u, -1, axis=0) - np.roll(u, 1, axis=0)) / (2*dy)
+    dvdx = (np.roll(v, -1, axis=1) - np.roll(v, 1, axis=1)) / (2*dx)
+    dvdy = (np.roll(v, -1, axis=0) - np.roll(v, 1, axis=0)) / (2*dy)
+    
+    # Compute viscous terms (Laplacian)
+    laplacian_u = (np.roll(u, -1, axis=1) + np.roll(u, 1, axis=1) - 2*u) / dx**2 + \
+                  (np.roll(u, -1, axis=0) + np.roll(u, 1, axis=0) - 2*u) / dy**2
+    laplacian_v = (np.roll(v, -1, axis=1) + np.roll(v, 1, axis=1) - 2*v) / dx**2 + \
+                  (np.roll(v, -1, axis=0) + np.roll(v, 1, axis=0) - 2*v) / dy**2
+    
+    # Compute intermediate velocities
+    u_star = u + dt * (-u*dudx - v*dudy + (1/Re)*laplacian_u)
+    v_star = v + dt * (-u*dvdx - v*dvdy + (1/Re)*laplacian_v + f_y)
+    
+    # Apply boundary conditions for intermediate velocities
+    # Inlet (left)
+    inlet_profile = np.sin(np.pi * y) * (np.sin(np.pi*t) + np.sin(3*np.pi*t) + np.sin(5*np.pi*t))
+    u_star[:, 0] = inlet_profile
+    v_star[:, 0] = 0
+    # Walls (top/bottom)
+    u_star[0, :] = 0; u_star[-1, :] = 0
+    v_star[0, :] = 0; v_star[-1, :] = 0
+    # Outlet (right)
+    u_star[:, -1] = u_star[:, -2]
+    v_star[:, -1] = v_star[:, -2]
+    
+    # Compute divergence for Poisson RHS
+    div_u = (np.roll(u_star, -1, axis=1) - np.roll(u_star, 1, axis=1)) / (2*dx)
+    div_v = (np.roll(v_star, -1, axis=0) - np.roll(v_star, 1, axis=0)) / (2*dy)
+    div = div_u + div_v
+    rhs = div.ravel() / dt
+    
+    # Set Dirichlet and Neumann conditions in RHS
+    for i in range(ny):
+        for j in range(nx):
+            idx = i * nx + j
+            if j == nx - 1:  # Outlet: p=0
+                rhs[idx] = 0.0
+            elif j == 0 or i == 0 or i == ny - 1:  # Neumann boundaries
+                rhs[idx] = 0.0
+    
+    # Solve pressure Poisson equation
+    p_flat, info = gmres(A, rhs, atol=1e-5, maxiter=1000)
+    p = p_flat.reshape(ny, nx)
+    
+    # Pressure correction for velocity
+    p_x = (np.roll(p, -1, axis=1) - np.roll(p, 1, axis=1)) / (2*dx)
+    p_y = (np.roll(p, -1, axis=0) - np.roll(p, 1, axis=0)) / (2*dy)
+    u = u_star - dt * p_x
+    v = v_star - dt * p_y
+    
+    # Enforce velocity boundary conditions
+    u[:, 0] = inlet_profile; v[:, 0] = 0  # Inlet
+    u[0, :] = 0; u[-1, :] = 0  # Walls
+    v[0, :] = 0; v[-1, :] = 0
+    u[:, -1] = u[:, -2]; v[:, -1] = v[:, -2]  # Outlet
+    
+    # Print diagnostics
+    max_vel = np.max(np.sqrt(u**2 + v**2))
+    div_max = np.max(np.abs(div))
+    print(f"Step {n+1}/{nt}: t={t:.4f}, Max vel={max_vel:.6f}, Max div={div_max:.6f}, GMRES info={info}")
+
+# Plot results at t=0.5
+plt.figure(figsize=(15, 10))
+
+plt.subplot(131)
+plt.contourf(X, Y, u, cmap='jet')
+plt.colorbar()
+plt.title('Velocity u')
+plt.xlabel('x')
+plt.ylabel('y')
+
+plt.subplot(132)
+plt.contourf(X, Y, v, cmap='jet')
+plt.colorbar()
+plt.title('Velocity v')
+plt.xlabel('x')
+plt.ylabel('y')
+
+plt.subplot(133)
+plt.contourf(X, Y, p, cmap='jet')
+plt.colorbar()
+plt.title('Pressure p')
+plt.xlabel('x')
+plt.ylabel('y')
+
+plt.tight_layout()
+plt.savefig('ns_results.png')
+```
+
+### Explanation:
+1. **Initialization**: Sets up the computational grid and initializes velocity/pressure fields.
+2. **Matrix Assembly**: Constructs the Poisson matrix with Neumann (inlet/walls) and Dirichlet (outlet) boundary conditions.
+3. **Time Integration**:
+   - Computes convective and viscous terms using central differences.
+   - Solves for intermediate velocities (`u_star`, `v_star`).
+   - Enforces boundary conditions on intermediate velocities.
+4. **Pressure Solve**:
+   - Computes divergence of intermediate velocity as the Poisson source term.
+   - Solves the pressure Poisson equation using GMRES with absolute tolerance `atol=1e-5`.
+5. **Velocity Correction**: Updates velocities using pressure gradients.
+6. **Boundary Enforcement**: Applies no-slip, inlet, and outlet conditions.
+7. **Diagnostics**: Prints maximum velocity and divergence for solution verification.
+8. **Visualization**: Saves velocity and pressure contours at t=0.5 using the 'jet' colormap.
+
+This implementation ensures numerical stability for Re=100 and provides detailed diagnostics for solution verification. The GMRES solver efficiently handles the pressure Poisson equation with mixed boundary conditions.
+****************************************

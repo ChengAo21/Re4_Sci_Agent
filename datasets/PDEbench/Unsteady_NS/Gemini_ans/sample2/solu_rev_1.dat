@@ -1,0 +1,416 @@
+
+****************************************
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg
+import matplotlib.pyplot as plt
+import os
+
+# Technical explanation for the solving algorithm
+# The problem solves the 2D unsteady incompressible Navier-Stokes equations using a Finite Difference Method (FDM)
+# on a collocated grid, coupled with a fractional step (projection) method for pressure-velocity decoupling.
+#
+# 1. Spatial Discretization:
+#    - A uniform Cartesian grid is used for spatial discretization.
+#    - All variables (u, v, p) are stored at cell centers (collocated grid).
+#    - Spatial derivatives (convection, diffusion, pressure gradients, divergence) are approximated using
+#      second-order central differences for interior points.
+#    - Boundary conditions are applied directly to the velocity fields or by modifying the finite difference
+#      stencils and right-hand sides for the pressure Poisson equation.
+#    - (Feedback incorporation): While central differences are used for convection, for higher Reynolds numbers
+#      or to prevent numerical oscillations, upwind schemes or flux limiters could be considered. For this problem,
+#      central differences are sufficient given the Re=100 and grid resolution.
+#
+# 2. Time Integration (Fractional Step Method):
+#    - The simulation progresses in time using an explicit Euler scheme for the momentum equations.
+#    - Each time step is split into three sub-steps:
+#      a. Predictor Step: An intermediate velocity field (u*, v*) is computed by solving the momentum
+#         equations without the pressure gradient term. Convective and diffusive terms are calculated
+#         using the velocity from the previous time step. Velocity boundary conditions are applied to
+#         u* and v* after this step.
+#      b. Pressure Correction Step: The incompressibility constraint (divergence-free velocity) is enforced.
+#         This leads to a Pressure Poisson Equation (PPE) for the pressure field (p).
+#         The PPE is of the form ∇²p = (1/Δt)∇·u*.
+#         The discrete Laplacian operator forms a large sparse linear system (Ap = b).
+#         (Feedback incorporation - Optimization): The matrix A for the PPE is constant and built only once
+#         before the time loop, significantly optimizing performance by avoiding redundant matrix assembly
+#         at each time step. Only the right-hand side vector 'b' is updated at each time step.
+#         Boundary conditions for pressure are derived from the velocity boundary conditions:
+#         - Dirichlet velocity BCs (inlet, top/bottom walls) translate to Neumann pressure BCs (∂p/∂n = (u*·n - u_n+1·n)/Δt).
+#         - The outlet has a specified Dirichlet pressure BC (p=0).
+#         The sparse linear system is solved using a Krylov subspace iteration method, specifically GMRES
+#         (Generalized Minimal Residual method), which is suitable for non-symmetric or indefinite systems
+#         that can arise from mixed boundary conditions. The `atol` parameter is used for convergence tolerance.
+#         (Feedback incorporation): For further performance, preconditioning (e.g., ILU) could be applied to GMRES.
+#      c. Velocity Correction Step: The intermediate velocity field (u*, v*) is corrected using the
+#         newly computed pressure gradient to obtain the divergence-free velocity field (u_n+1, v_n+1).
+#         u_n+1 = u* - Δt∇p, v_n+1 = v* - Δt∇p. Velocity boundary conditions are re-applied to the
+#         final velocity fields.
+#    - (Feedback incorporation): While explicit Euler is simple, for longer simulations or higher Reynolds numbers,
+#      semi-implicit schemes (e.g., Crank-Nicolson for diffusion) or higher-order Runge-Kutta methods could
+#      provide better stability and accuracy, allowing for larger time steps.
+#
+# 3. Boundary Conditions:
+#    - Velocity:
+#      - No-slip (top/bottom walls): u=0, v=0 (Dirichlet).
+#      - Inlet (left): Time-dependent u-profile, v=0 (Dirichlet).
+#      - Outlet (right): Zero-gradient for u and v (Neumann).
+#    - Pressure:
+#      - Outlet (right): p=0 (Dirichlet).
+#      - Other boundaries (inlet, top/bottom): Neumann BCs derived from the projection method. These are
+#        incorporated into the RHS vector and by modifying the Laplacian matrix stencil at the boundaries.
+#
+# 4. Libraries:
+#    - `numpy` for numerical operations and array manipulation.
+#    - `scipy.sparse` for constructing sparse matrices for the PPE.
+#    - `scipy.sparse.linalg` for solving the sparse linear system using GMRES.
+#    - `matplotlib.pyplot` for plotting the results.
+
+# Define constants and parameters
+Re = 100.0  # Reynolds number
+
+# Domain dimensions
+Lx = 2.0
+Ly = 1.0
+
+# Grid resolution
+Nx = 80  # Number of grid points in x-direction
+Ny = 40  # Number of grid points in y-direction
+dx = Lx / (Nx - 1)
+dy = Ly / (Ny - 1)
+
+# Time parameters
+T_final = 0.5
+# Choose dt based on stability criteria (CFL for convection, diffusion limit)
+# A conservative estimate for explicit Euler:
+dt = 0.0005 # This value ensures stability for the given Re and grid resolution
+
+# Create grid
+x = np.linspace(0, Lx, Nx)
+y = np.linspace(0, Ly, Ny)
+X, Y = np.meshgrid(x, y) # For plotting and forcing term calculation
+
+# Initialize velocity and pressure fields
+u = np.zeros((Ny, Nx))
+v = np.zeros((Ny, Nx))
+p = np.zeros((Ny, Nx))
+
+# Store previous time step values (for explicit terms)
+u_prev = np.copy(u)
+v_prev = np.copy(v)
+
+# Helper functions for derivatives (central differences for interior points)
+def laplacian(field, dx, dy):
+    # Computes the discrete Laplacian (d^2/dx^2 + d^2/dy^2) for interior points.
+    # Boundary values are assumed to be handled by the caller (e.g., by applying BCs to 'field' beforehand).
+    lap = np.zeros_like(field)
+    lap[1:-1, 1:-1] = (field[1:-1, 2:] - 2 * field[1:-1, 1:-1] + field[1:-1, :-2]) / dx**2 + \
+                      (field[2:, 1:-1] - 2 * field[1:-1, 1:-1] + field[:-2, 1:-1]) / dy**2
+    return lap
+
+def grad_x(field, dx):
+    # Computes the discrete gradient in x-direction (d/dx) for interior points.
+    grad = np.zeros_like(field)
+    grad[:, 1:-1] = (field[:, 2:] - field[:, :-2]) / (2 * dx)
+    return grad
+
+def grad_y(field, dy):
+    # Computes the discrete gradient in y-direction (d/dy) for interior points.
+    grad = np.zeros_like(field)
+    grad[1:-1, :] = (field[2:, :] - field[:-2, :]) / (2 * dy)
+    return grad
+
+def apply_velocity_bcs(u_field, v_field, current_t, y_coords, Nx, Ny):
+    # Applies velocity boundary conditions to the given u and v fields.
+    # No-slip on top and bottom walls
+    u_field[0, :] = 0.0
+    v_field[0, :] = 0.0
+    u_field[Ny-1, :] = 0.0
+    v_field[Ny-1, :] = 0.0
+
+    # Inlet condition at left boundary
+    u_field[:, 0] = np.sin(np.pi * y_coords) * (np.sin(np.pi * current_t) + np.sin(3 * np.pi * current_t) + np.sin(5 * np.pi * current_t))
+    v_field[:, 0] = 0.0
+
+    # Outlet condition at right boundary (zero-gradient Neumann)
+    # This is implemented by setting the boundary value equal to the adjacent interior value.
+    u_field[:, Nx-1] = u_field[:, Nx-2]
+    v_field[:, Nx-1] = v_field[:, Nx-2]
+
+# Optimized part: Build the Pressure Poisson Equation (PPE) matrix A once
+# This function constructs the sparse matrix A for the pressure Poisson equation.
+# It includes the standard 5-point stencil for interior points, the Dirichlet BC for p=0 at the right outlet,
+# and the structural modifications to the stencil coefficients for the Neumann boundaries (left, top, bottom).
+def build_pressure_matrix(Nx, Ny, dx, dy):
+    A = sp.lil_matrix((Ny * Nx, Ny * Nx))
+
+    for j in range(Ny):
+        for i in range(Nx):
+            k = j * Nx + i # Global 1D index for the (j, i) grid point
+
+            # Right outlet (Dirichlet BC: p = 0)
+            # For these points, the equation becomes p_k = 0.
+            if i == Nx - 1:
+                A[k, k] = 1.0
+                continue # Move to the next grid point
+
+            # For interior points and other boundaries (Neumann BCs for pressure)
+            # Standard 5-point stencil coefficients for the Laplacian operator.
+            diag_coeff = -2.0 / dx**2 - 2.0 / dy**2
+            x_coeff = 1.0 / dx**2
+            y_coeff = 1.0 / dy**2
+
+            # Initialize with interior stencil coefficients
+            A[k, k] = diag_coeff
+            if i > 0: A[k, k - 1] = x_coeff
+            if i < Nx - 1: A[k, k + 1] = x_coeff
+            if j > 0: A[k, k - Nx] = y_coeff
+            if j < Ny - 1: A[k, k + Nx] = y_coeff
+
+            # Modify stencil for Neumann BCs (ghost cell approach, structural part)
+            # Left boundary (i=0): ∂p/∂x = C_left_j. Stencil for p_{0,j} involves p_{1,j} and p_{-1,j}.
+            # Using p_{-1,j} = p_{1,j} - 2*dx*C_left_j, the p_{1,j} coefficient becomes 2/dx^2.
+            if i == 0:
+                A[k, k] = -2.0 / dx**2 - 2.0 / dy**2 # Reset diagonal for clarity
+                A[k, k + 1] = 2.0 / dx**2 # Modified coefficient for p_{1,j}
+
+            # Bottom boundary (j=0): ∂p/∂y = C_bottom_i. Stencil for p_{i,0} involves p_{i,1} and p_{i,-1}.
+            # Using p_{i,-1} = p_{i,1} - 2*dy*C_bottom_i, the p_{i,1} coefficient becomes 2/dy^2.
+            if j == 0:
+                A[k, k] = -2.0 / dx**2 - 2.0 / dy**2 # Reset diagonal
+                A[k, k + Nx] = 2.0 / dy**2 # Modified coefficient for p_{i,1}
+
+            # Top boundary (j=Ny-1): ∂p/∂y = C_top_i. Stencil for p_{i,Ny-1} involves p_{i,Ny-2} and p_{i,Ny}.
+            # Using p_{i,Ny} = p_{i,Ny-2} + 2*dy*C_top_i (note sign for outward normal), the p_{i,Ny-2} coefficient becomes 2/dy^2.
+            if j == Ny - 1:
+                A[k, k] = -2.0 / dx**2 - 2.0 / dy**2 # Reset diagonal
+                A[k, k - Nx] = 2.0 / dy**2 # Modified coefficient for p_{i,Ny-2}
+
+    return A.tocsr() # Convert to CSR format for efficient matrix-vector products with GMRES
+
+# Optimized part: Build the RHS vector b for the Pressure Poisson Equation at each time step
+# This function constructs the RHS vector 'b' for the PPE.
+# It includes the divergence term (∇·u*)/Δt and the terms arising from the Neumann boundary conditions.
+def build_pressure_rhs(u_star, v_star, u_n_plus_1, v_n_plus_1, dt, dx, dy, Nx, Ny):
+    b = np.zeros(Ny * Nx)
+
+    for j in range(Ny):
+        for i in range(Nx):
+            k = j * Nx + i # Global 1D index for the (j, i) grid point
+
+            # Right outlet (Dirichlet BC: p = 0)
+            # For these points, b_k is 0.0, which is already set by np.zeros.
+            if i == Nx - 1:
+                continue # Move to the next grid point
+
+            # Add the divergence term (∇·u*/Δt) to the RHS for interior and Neumann boundaries.
+            # This term is the primary source for the pressure field.
+            # Use central differences for interior, one-sided for boundaries for divergence.
+            div_u_star_ij = 0.0
+            if i == 0: # Left boundary
+                div_u_star_ij += (u_star[j, 1] - u_star[j, 0]) / dx # Forward difference for du*/dx
+            elif i == Nx - 1: # Right boundary (already handled by Dirichlet p=0, so this block is skipped)
+                pass
+            else: # Interior x
+                div_u_star_ij += (u_star[j, i+1] - u_star[j, i-1]) / (2 * dx)
+
+            if j == 0: # Bottom boundary
+                div_u_star_ij += (v_star[1, i] - v_star[0, i]) / dy # Forward difference for dv*/dy
+            elif j == Ny - 1: # Top boundary
+                div_u_star_ij += (v_star[Ny-1, i] - v_star[Ny-2, i]) / dy # Backward difference for dv*/dy
+            else: # Interior y
+                div_u_star_ij += (v_star[j+1, i] - v_star[j-1, i]) / (2 * dy)
+
+            b[k] += div_u_star_ij / dt
+
+            # Add terms from Neumann BCs to RHS
+            # Left boundary (i=0): ∂p/∂x = C_left_j = (u_star[j,0] - u_n_plus_1[j,0]) / dt
+            if i == 0:
+                C_left_j = (u_star[j, 0] - u_n_plus_1[j, 0]) / dt
+                b[k] -= (2.0 * C_left_j) / dx # Add boundary term to RHS
+
+            # Bottom boundary (j=0): ∂p/∂y = C_bottom_i = (v_star[0,i] - v_n_plus_1[0,i]) / dt
+            if j == 0:
+                C_bottom_i = (v_star[0, i] - v_n_plus_1[0, i]) / dt
+                b[k] -= (2.0 * C_bottom_i) / dy # Add boundary term to RHS
+
+            # Top boundary (j=Ny-1): ∂p/∂y = C_top_i = (v_star[Ny-1,i] - v_n_plus_1[Ny-1,i]) / dt
+            # Note: Normal vector points outwards, so for top wall, normal is (0,1).
+            if j == Ny - 1:
+                C_top_i = (v_star[Ny-1, i] - v_n_plus_1[Ny-1, i]) / dt
+                b[k] += (2.0 * C_top_i) / dy # Add boundary term to RHS (sign depends on normal direction)
+
+    return b
+
+# Main time loop for the simulation
+current_t = 0.0
+time_step_count = 0
+
+print("Starting 2D Unsteady Incompressible Navier-Stokes Simulation...")
+print(f"Domain: [{Lx}x{Ly}], Grid: {Nx}x{Ny}, dx={dx:.4f}, dy={dy:.4f}")
+print(f"Final Time: {T_final}, Initial dt: {dt}")
+print(f"Reynolds Number (Re): {Re}")
+print("-----------------------------------------------------------------")
+
+# Optimized part: Build the pressure matrix A once before the time loop
+print("Building Pressure Poisson Matrix (A)...")
+A_pressure = build_pressure_matrix(Nx, Ny, dx, dy)
+print("Pressure Poisson Matrix (A) built successfully.")
+print(f"Matrix A dimensions: {A_pressure.shape}, Number of non-zero elements: {A_pressure.nnz}")
+print("-----------------------------------------------------------------")
+
+while current_t < T_final:
+    # Adjust dt for the last time step to hit T_final exactly
+    if current_t + dt > T_final:
+        dt = T_final - current_t
+        if dt < 1e-12: # Break if dt becomes extremely small (floating point precision)
+            break
+
+    time_step_count += 1
+    print(f"Time Step: {time_step_count}, Current Time: {current_t:.6f}, dt: {dt:.6f}")
+
+    # Store previous time step values for explicit terms in the predictor step
+    u_prev[:] = u[:]
+    v_prev[:] = v[:]
+
+    # Apply velocity BCs to u_prev, v_prev. These are the u_n values used for calculating
+    # convective and diffusive terms, and also serve as u_n+1 for the previous time step
+    # when calculating pressure Neumann BCs.
+    u_bc_prev_step = u_prev.copy()
+    v_bc_prev_step = v_prev.copy()
+    apply_velocity_bcs(u_bc_prev_step, v_bc_prev_step, current_t, y, Nx, Ny)
+
+    # Step 1: Predictor Step (Compute u_star, v_star)
+    # Calculate convective terms using velocities from the previous time step (u_prev, v_prev)
+    u_conv_x = u_bc_prev_step * grad_x(u_bc_prev_step, dx)
+    u_conv_y = v_bc_prev_step * grad_y(u_bc_prev_step, dy)
+    v_conv_x = u_bc_prev_step * grad_x(v_bc_prev_step, dx)
+    v_conv_y = v_bc_prev_step * grad_y(v_bc_prev_step, dy)
+
+    # Calculate diffusive terms using velocities from the previous time step
+    u_diff = (1.0 / Re) * laplacian(u_bc_prev_step, dx, dy)
+    v_diff = (1.0 / Re) * laplacian(v_bc_prev_step, dx, dy)
+
+    # Forcing term at current_t
+    f_y = -np.sin(np.pi * X) * np.sin(np.pi * Y) * np.sin(np.pi * current_t)
+
+    # Predictor step (explicit Euler time integration)
+    u_star = u_prev + dt * (-u_conv_x - u_conv_y + u_diff)
+    v_star = v_prev + dt * (-v_conv_x - v_conv_y + v_diff + f_y)
+
+    # Apply velocity BCs to u_star, v_star. These are the u_n+1 values for the current time step
+    # that are used in the pressure Neumann BCs.
+    u_bc_curr_step = u_star.copy()
+    v_bc_curr_step = v_star.copy()
+    apply_velocity_bcs(u_bc_curr_step, v_bc_curr_step, current_t + dt, y, Nx, Ny)
+
+    # Step 2: Pressure Correction (Solve PPE)
+    # Build the b vector for the Pressure Poisson Equation.
+    b_pressure_flat = build_pressure_rhs(u_star, v_star, u_bc_curr_step, v_bc_curr_step, dt, dx, dy, Nx, Ny)
+
+    # Solve the linear system for pressure using GMRES.
+    # x0 provides an initial guess (pressure from previous time step).
+    # atol specifies the absolute tolerance for convergence.
+    # maxiter limits the number of iterations.
+    p_flat, info = sp.linalg.gmres(A_pressure, b_pressure_flat, x0=p.flatten(), atol=1e-6, maxiter=500)
+    p = p_flat.reshape((Ny, Nx))
+
+    # Print solver information to facilitate reliability check
+    if info == 0:
+        print("  Pressure solver converged successfully.")
+    else:
+        print(f"  Pressure solver did NOT converge. GMRES info code: {info}")
+        # A non-zero info code indicates non-convergence within maxiter or other issues.
+
+    # Step 3: Velocity Correction
+    # Compute pressure gradients using the newly solved pressure field
+    grad_p_x = grad_x(p, dx)
+    grad_p_y = grad_y(p, dy)
+
+    # Correct velocities to be divergence-free
+    u = u_star - dt * grad_p_x
+    v = v_star - dt * grad_p_y
+
+    # Re-apply velocity BCs to the corrected u, v (u_n+1).
+    # This ensures that the final velocity field strictly satisfies the Dirichlet BCs.
+    apply_velocity_bcs(u, v, current_t + dt, y, Nx, Ny)
+
+    # Feedback incorporation: Add divergence check
+    # Calculate divergence of the corrected velocity field (u, v)
+    # Use central differences for interior, one-sided for boundaries consistent with PPE derivation.
+    div_u = np.zeros_like(u)
+    for j in range(Ny):
+        for i in range(Nx):
+            du_dx = 0.0
+            dv_dy = 0.0
+
+            # du/dx
+            if i == 0: # Left boundary
+                du_dx = (u[j, 1] - u[j, 0]) / dx # Forward difference
+            elif i == Nx - 1: # Right boundary
+                du_dx = (u[j, Nx-1] - u[j, Nx-2]) / dx # Backward difference
+            else: # Interior x
+                du_dx = (u[j, i+1] - u[j, i-1]) / (2 * dx)
+
+            # dv/dy
+            if j == 0: # Bottom boundary
+                dv_dy = (v[1, i] - v[0, i]) / dy # Forward difference
+            elif j == Ny - 1: # Top boundary
+                dv_dy = (v[Ny-1, i] - v[Ny-2, i]) / dy # Backward difference
+            else: # Interior y
+                dv_dy = (v[j+1, i] - v[j-1, i]) / (2 * dy)
+
+            div_u[j, i] = du_dx + dv_dy
+    
+    max_divergence = np.max(np.abs(div_u))
+    print(f"  Max absolute divergence of velocity: {max_divergence:.2e}")
+
+    current_t += dt
+
+print("\nSimulation finished.")
+print(f"Final time reached: {current_t:.6f}")
+print("-----------------------------------------------------------------")
+
+# Plotting results at T_final
+# Create a directory for saving plots if it doesn't exist
+output_dir = "ns_results_refined"
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+# Plot contour of u velocity
+plt.figure(figsize=(10, 4))
+plt.contourf(X, Y, u, 50, cmap='jet') # 50 contour levels
+plt.colorbar(label='u velocity (m/s)')
+plt.title(f'u velocity at t = {T_final:.2f} s')
+plt.xlabel('x (m)')
+plt.ylabel('y (m)')
+plt.tight_layout()
+plt.savefig(os.path.join(output_dir, 'u_velocity_contour.png'))
+plt.close()
+
+# Plot contour of v velocity
+plt.figure(figsize=(10, 4))
+plt.contourf(X, Y, v, 50, cmap='jet')
+plt.colorbar(label='v velocity (m/s)')
+plt.title(f'v velocity at t = {T_final:.2f} s')
+plt.xlabel('x (m)')
+plt.ylabel('y (m)')
+plt.tight_layout()
+plt.savefig(os.path.join(output_dir, 'v_velocity_contour.png'))
+plt.close()
+
+# Plot contour of pressure
+plt.figure(figsize=(10, 4))
+plt.contourf(X, Y, p, 50, cmap='jet')
+plt.colorbar(label='Pressure (Pa)')
+plt.title(f'Pressure at t = {T_final:.2f} s')
+plt.xlabel('x (m)')
+plt.ylabel('y (m)')
+plt.tight_layout()
+plt.savefig(os.path.join(output_dir, 'pressure_contour.png'))
+plt.close()
+
+print(f"Contour plots saved to '{output_dir}' directory.")
+```
+****************************************

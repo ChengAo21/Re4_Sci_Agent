@@ -1,0 +1,233 @@
+
+****************************************
+```python
+# Import necessary libraries
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Technical explanation for the solving algorithm
+# The Artificial Compressibility Method (ACM) is employed to solve the steady incompressible Navier-Stokes equations.
+# This method transforms the steady-state problem into a pseudo-time dependent system by introducing a pseudo-time derivative
+# for pressure, coupled with the divergence of the velocity field. The system is then marched in pseudo-time until a steady
+# state is reached, at which point the pseudo-time derivatives become zero, and the original steady equations are satisfied.
+#
+# The governing equations for the ACM are:
+# 1. Momentum equation for u: ∂u/∂τ + u(∂u/∂x) + v(∂u/∂y) + ∂p/∂x - (1/Re)(∂²u/∂x² + ∂²u/∂y²) = 0
+# 2. Momentum equation for v: ∂v/∂τ + u(∂v/∂x) + v(∂v/∂y) + ∂p/∂y - (1/Re)(∂²v/∂x² + ∂²v/∂y²) = 0
+# 3. Artificial continuity equation: ∂p/∂τ + β(∂u/∂x + ∂v/∂y) = 0
+#
+# Here, τ is the pseudo-time, and β is the artificial compressibility parameter.
+#
+# Discretization:
+# - Spatial derivatives are approximated using second-order central finite differences on a uniform Cartesian grid.
+#   For a function φ at grid point (i,j):
+#   ∂φ/∂x ≈ (φ[i+1,j] - φ[i-1,j]) / (2Δx)
+#   ∂φ/∂y ≈ (φ[i,j+1] - φ[i,j-1]) / (2Δy)
+#   ∂²φ/∂x² ≈ (φ[i+1,j] - 2φ[i,j] + φ[i-1,j]) / (Δx²)
+#   ∂²φ/∂y² ≈ (φ[i,j+1] - 2φ[i,j] + φ[i,j-1]) / (Δy²)
+# - Pseudo-time integration is performed using an explicit Euler scheme.
+#   φ_new = φ_old + Δτ * RHS(φ_old)
+#
+# Boundary Conditions:
+# - Velocity (u,v): Dirichlet conditions are applied directly at the boundary nodes.
+#   - Top boundary (y=1): u = αx(1-x), v = 0
+#   - Left, Right, Bottom boundaries (x=0, x=1, y=0): u = 0, v = 0
+# - Pressure (p):
+#   - Reference pressure: p(0,0) = 0. This is enforced by shifting the entire pressure field at each pseudo-time step
+#     such that the pressure at the (0,0) grid point becomes zero.
+#   - Zero normal pressure gradient (∂p/∂n = 0) on all boundaries. This is implemented using Neumann boundary conditions
+#     by setting the pressure at the boundary node equal to the pressure at its adjacent interior node (e.g., p_boundary = p_interior_neighbor).
+#
+# Iteration and Convergence:
+# The simulation proceeds iteratively in pseudo-time. At each iteration, the spatial derivatives are computed using the
+# current field values, and then u, v, p are updated. Velocity boundary conditions are applied before the update, and
+# pressure boundary conditions (including the reference pressure) are applied after the update.
+# Convergence is monitored by checking the L2 norm of the divergence of the velocity field (∂u/∂x + ∂v/∂y) over the interior domain.
+# The simulation stops when this norm falls below a predefined tolerance or a maximum number of iterations is reached.
+
+# Define simulation parameters
+Nx = 51  # Number of grid points in x-direction
+Ny = 51  # Number of grid points in y-direction
+Lx = 1.0  # Domain length in x
+Ly = 1.0  # Domain length in y
+Re = 100.0  # Reynolds number
+alpha = 2.0  # Parameter for top boundary velocity profile
+beta = 1.0  # Artificial compressibility parameter
+
+# Grid spacing
+dx = Lx / (Nx - 1)
+dy = Ly / (Ny - 1)
+
+# Pseudo-time step (Δτ)
+# This value is crucial for stability and convergence speed.
+# A smaller dt ensures stability but slows down convergence.
+# For explicit schemes, dt is typically limited by CFL conditions.
+dt = 0.001 # Chosen to ensure stability for Re=100 and current grid resolution
+
+# Maximum number of pseudo-time iterations
+max_iter = 100000 # Increased max_iter for better convergence
+# Convergence tolerance for the L2 norm of divergence
+tolerance = 1e-5
+
+# Initialize fields
+# u, v, p are stored as (Nx, Ny) arrays, representing values at grid points (x_i, y_j)
+u = np.zeros((Nx, Ny))
+v = np.zeros((Nx, Ny))
+p = np.zeros((Nx, Ny))
+
+# Create coordinate arrays for plotting
+x_coords = np.linspace(0, Lx, Nx)
+y_coords = np.linspace(0, Ly, Ny)
+# X and Y are 2D arrays for meshgrid, suitable for matplotlib's contourf and streamplot
+# X will have shape (Ny, Nx), Y will have shape (Ny, Nx)
+X, Y = np.meshgrid(x_coords, y_coords)
+
+# Store velocity boundary conditions
+u_bc = np.zeros((Nx, Ny))
+v_bc = np.zeros((Nx, Ny))
+
+# Apply top boundary condition for u (y=1, which corresponds to j = Ny-1)
+# The velocity profile is u = alpha * x * (1 - x)
+u_bc[:, Ny-1] = alpha * x_coords * (1 - x_coords)
+# All other velocity boundary conditions are (0,0), which is already the default for u_bc, v_bc initialized with zeros.
+
+# Main pseudo-time iteration loop
+print("--- Starting Artificial Compressibility Method Simulation ---")
+print(f"Grid: {Nx}x{Ny}, dx={dx:.4f}, dy={dy:.4f}, dt={dt:.4f}, Re={Re}, alpha={alpha}, beta={beta}")
+print(f"Max Iterations: {max_iter}, Convergence Tolerance (Divergence L2 norm): {tolerance:.1e}")
+
+# Variable to store the L2 norm of divergence for convergence check
+divergence_norm = float('inf')
+
+for iter_num in range(max_iter):
+    # Apply velocity boundary conditions (Dirichlet)
+    # These values are fixed and do not get updated by the PDE.
+    # Top boundary (y=1, j=Ny-1)
+    u[:, Ny-1] = u_bc[:, Ny-1]
+    v[:, Ny-1] = v_bc[:, Ny-1] # which is 0
+    # Left boundary (x=0, i=0)
+    u[0, :] = u_bc[0, :] # which is 0
+    v[0, :] = v_bc[0, :] # which is 0
+    # Right boundary (x=1, i=Nx-1)
+    u[Nx-1, :] = u_bc[Nx-1, :] # which is 0
+    v[Nx-1, :] = v_bc[Nx-1, :] # which is 0
+    # Bottom boundary (y=0, j=0)
+    u[:, 0] = u_bc[:, 0] # which is 0
+    v[:, 0] = v_bc[:, 0] # which is 0
+
+    # Calculate spatial derivatives for interior points (i from 1 to Nx-2, j from 1 to Ny-2)
+    # These derivatives are computed using the current (old) field values.
+    # Using vectorized operations for efficiency.
+    
+    # First-order derivatives (for convective and pressure gradient terms)
+    du_dx = (u[2:Nx, 1:Ny-1] - u[0:Nx-2, 1:Ny-1]) / (2 * dx)
+    du_dy = (u[1:Nx-1, 2:Ny] - u[1:Nx-1, 0:Ny-2]) / (2 * dy)
+    dv_dx = (v[2:Nx, 1:Ny-1] - v[0:Nx-2, 1:Ny-1]) / (2 * dx)
+    dv_dy = (v[1:Nx-1, 2:Ny] - v[1:Nx-1, 0:Ny-2]) / (2 * dy)
+    dp_dx = (p[2:Nx, 1:Ny-1] - p[0:Nx-2, 1:Ny-1]) / (2 * dx)
+    dp_dy = (p[1:Nx-1, 2:Ny] - p[1:Nx-1, 0:Ny-2]) / (2 * dy)
+
+    # Second-order derivatives (for diffusive terms)
+    d2u_dx2 = (u[2:Nx, 1:Ny-1] - 2 * u[1:Nx-1, 1:Ny-1] + u[0:Nx-2, 1:Ny-1]) / (dx**2)
+    d2u_dy2 = (u[1:Nx-1, 2:Ny] - 2 * u[1:Nx-1, 1:Ny-1] + u[1:Nx-1, 0:Ny-2]) / (dy**2)
+    d2v_dx2 = (v[2:Nx, 1:Ny-1] - 2 * v[1:Nx-1, 1:Ny-1] + v[0:Nx-2, 1:Ny-1]) / (dx**2)
+    d2v_dy2 = (v[1:Nx-1, 2:Ny] - 2 * v[1:Nx-1, 1:Ny-1] + v[1:Nx-1, 0:Ny-2]) / (dy**2)
+
+    # Update u, v, p for interior points using explicit Euler scheme
+    # The indices [1:Nx-1, 1:Ny-1] select the interior grid points.
+    
+    # Momentum equation for u
+    u[1:Nx-1, 1:Ny-1] += dt * (
+        - (u[1:Nx-1, 1:Ny-1] * du_dx + v[1:Nx-1, 1:Ny-1] * du_dy)  # Convective terms
+        - dp_dx                                                    # Pressure gradient term
+        + (1.0 / Re) * (d2u_dx2 + d2u_dy2)                         # Diffusive terms
+    )
+
+    # Momentum equation for v
+    v[1:Nx-1, 1:Ny-1] += dt * (
+        - (u[1:Nx-1, 1:Ny-1] * dv_dx + v[1:Nx-1, 1:Ny-1] * dv_dy)  # Convective terms
+        - dp_dy                                                    # Pressure gradient term
+        + (1.0 / Re) * (d2v_dx2 + d2v_dy2)                         # Diffusive terms
+    )
+
+    # Artificial continuity equation for p
+    # Calculate divergence for the interior points
+    divergence_interior = du_dx + dv_dy
+    p[1:Nx-1, 1:Ny-1] += dt * (-beta * divergence_interior)
+
+    # Apply pressure boundary conditions (Neumann: ∂p/∂n = 0)
+    # This is implemented by setting boundary values equal to adjacent interior values.
+    # Left boundary (x=0, i=0)
+    p[0, :] = p[1, :]
+    # Right boundary (x=1, i=Nx-1)
+    p[Nx-1, :] = p[Nx-2, :]
+    # Bottom boundary (y=0, j=0)
+    p[:, 0] = p[:, 1]
+    # Top boundary (y=1, j=Ny-1)
+    p[:, Ny-1] = p[:, Ny-2]
+
+    # Enforce reference pressure p(0,0) = 0
+    # The (0,0) grid point corresponds to p[0,0] in our array.
+    # Subtract p[0,0] from the entire pressure field to shift its reference.
+    p -= p[0,0]
+
+    # Calculate divergence for convergence check (L2 norm)
+    # Recalculate divergence using the updated u, v fields for the interior domain.
+    du_dx_check = (u[2:Nx, 1:Ny-1] - u[0:Nx-2, 1:Ny-1]) / (2 * dx)
+    dv_dy_check = (v[1:Nx-1, 2:Ny] - v[1:Nx-1, 0:Ny-2]) / (2 * dy)
+    # Compute the L2 norm (Frobenius norm for 2D array) of the divergence field
+    # Divide by sqrt(number of points) to get the root mean square (RMS) value.
+    divergence_norm = np.linalg.norm(du_dx_check + dv_dy_check) / np.sqrt((Nx-2)*(Ny-2))
+
+    # Print progress and check for convergence
+    if iter_num % 5000 == 0 or iter_num == max_iter - 1:
+        print(f"Iteration {iter_num:6d}, Divergence L2 norm: {divergence_norm:.8e}")
+    
+    if divergence_norm < tolerance:
+        print(f"Converged at iteration {iter_num} with Divergence L2 norm: {divergence_norm:.8e}")
+        break
+else:
+    print(f"Maximum iterations ({max_iter}) reached. Final Divergence L2 norm: {divergence_norm:.8e}")
+
+# Implement detailed result printing within the code architecture.
+print("\n--- Simulation Summary ---")
+print(f"Final Divergence L2 norm: {divergence_norm:.8e}")
+print(f"Total iterations: {iter_num + 1}")
+
+# Post-processing: Calculate velocity magnitude
+# velocity_magnitude will have shape (Nx, Ny)
+velocity_magnitude = np.sqrt(u**2 + v**2)
+
+# Plotting the results
+plt.figure(figsize=(10, 8))
+
+# Contour plot of velocity magnitude
+# Matplotlib's contourf expects Z to have shape (Ny, Nx) if X and Y are from meshgrid(x_coords, y_coords).
+# Our u, v, and velocity_magnitude arrays are (Nx, Ny), so we need to transpose them.
+contour = plt.contourf(X, Y, velocity_magnitude.T, levels=50, cmap='jet')
+plt.colorbar(contour, label='Velocity Magnitude')
+
+# Streamlines
+# Similarly, streamplot expects U and V to have shape (Ny, Nx)
+plt.streamplot(X, Y, u.T, v.T, color='k', linewidth=0.5, density=1.5)
+
+plt.title('Velocity Magnitude Contours and Streamlines (Navier-Stokes)')
+plt.xlabel('x-coordinate')
+plt.ylabel('y-coordinate')
+plt.gca().set_aspect('equal', adjustable='box') # Ensure aspect ratio is 1:1 for square domain
+plt.tight_layout() # Adjust layout to prevent labels from overlapping
+
+# Save the figure
+output_filename = 'navier_stokes_solution.png'
+plt.savefig(output_filename, dpi=300)
+print(f"Plot saved to {output_filename}")
+
+# Optional: Print some characteristic values from the solution
+print("\n--- Characteristic Values from Solution ---")
+print(f"Maximum velocity magnitude: {np.max(velocity_magnitude):.4f}")
+print(f"Minimum pressure: {np.min(p):.4f}")
+print(f"Maximum pressure: {np.max(p):.4f}")
+print(f"Pressure at (0,0) grid point: {p[0,0]:.4f} (should be 0 due to reference condition)")
+print(f"Pressure at (1,1) grid point: {p[Nx-1,Ny-1]:.4f}")
+```
+****************************************

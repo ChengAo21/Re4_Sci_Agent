@@ -1,0 +1,275 @@
+
+****************************************
+```python
+# Imports
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+import matplotlib.pyplot as plt
+import scipy.linalg
+
+# Technical explanation for the solving algorithm
+# The problem aims to identify an optimal dimensionless quantity (Pi) formed by combining seven physical parameters,
+# such that Pi exhibits the highest coefficient of determination (R-squared) with the keyhole aspect ratio (e*).
+# The exponents of the physical quantities in Pi must be integers or rational fractions, with absolute values not exceeding 3,
+# and the resulting dimensionless exponents must be normalized by the laser scan speed (V_s).
+
+# Algorithm: Systematic Dimensional Analysis with Fixed V_s Exponent and Grid Search
+# 1.  **Dimensional Analysis Setup**:
+#     -   Define the fundamental dimensions (Mass [M], Length [L], Time [T], Temperature [Theta]) for each of the seven physical quantities:
+#         eta P (Power): [M L^2 T^-3]
+#         V_s (Speed): [L T^-1]
+#         r_0 (Length): [L]
+#         alpha (Thermal Diffusivity): [L^2 T^-1]
+#         rho (Density): [M L^-3]
+#         C_p (Heat Capacity): [L^2 T^-2 Theta^-1]
+#         T_l-T_0 (Temperature Difference): [Theta]
+#     -   Construct a dimensional matrix (D) where rows represent fundamental dimensions and columns represent physical quantities.
+#         For a dimensionless quantity Pi = Q1^x1 * Q2^x2 * ... * Qn^xn, the sum of (exponent * dimension_vector) for each fundamental dimension must be zero.
+#         This translates to D @ x = 0, where x is the vector of exponents.
+# 2.  **Exponent Constraints and Normalization**:
+#     -   The problem requires exponents to be integers or rational fractions within [-3, 3]. A predefined set of rational numbers (e.g., integers and half-integers, or quarters) is generated for the grid search.
+#     -   "Normalized by V_s" implies that the exponent of V_s (let's call it 'b') should be a fixed reference, typically 1 or -1. This significantly reduces the search space.
+# 3.  **Reduced Search Space via Dimensional Homogeneity**:
+#     -   The dimensional matrix D (4x7) implies that 4 exponents can be expressed as linear combinations of the remaining 3.
+#     -   By fixing the exponent of V_s (b) to either 1 or -1, we are left with 2 independent exponents to iterate over (e.g., r_0 and alpha). The remaining 4 exponents (eta P, rho, C_p, T_l-T_0) can then be determined by solving the system of linear equations derived from D @ x = 0.
+#     -   Specifically, we partition the exponent vector `x` into `x_independent` (e.g., `r_0`, `alpha`) and `x_dependent` (e.g., `eta P`, `rho`, `C_p`, `T_l-T_0`), with `V_s`'s exponent `b` being fixed. The equation becomes `D_dep @ x_dep = -D_ind @ x_ind - D_b * b_fixed`.
+# 4.  **Grid Search and R-squared Evaluation**:
+#     -   Iterate through all combinations of the two independent exponents (r_0 and alpha) from the predefined set of rational numbers.
+#     -   For each combination, calculate the dependent exponents. Due to floating-point arithmetic, these calculated dependent exponents are rounded to the nearest value in the predefined rational set, within a small tolerance. If they don't fall within the set or exceed the absolute bound of 3, the combination is discarded.
+#     -   If a valid set of exponents is found, construct the dimensionless quantity Pi for all data points: `Pi = (eta P)^a * (V_s)^b * ...`.
+#     -   To evaluate the correlation, a linear regression is performed between `log(e*)` and `log(Pi)`. This is because a power-law relationship `e* = K * Pi^m` transforms into a linear relationship `log(e*) = log(K) + m * log(Pi)`.
+#     -   The R-squared value from this linear regression is calculated.
+# 5.  **Optimal Group Identification**:
+#     -   The set of exponents that yields the highest R-squared value is identified as the optimal dimensionless quantity.
+# 6.  **Result Reporting and Visualization**:
+#     -   The optimal R-squared, the formula for the optimal dimensionless quantity, and the corresponding exponents are printed.
+#     -   Plots of `log(e*)` vs `log(Pi_optimal)` and `e*` vs `Pi_optimal` are generated and saved to visualize the correlation.
+
+# Constants and configurations
+FILE_PATH = 'Q:/Work2/LLM_/test_Agent/dataset_keyhole.csv'
+# Column indices (0-indexed) for the physical quantities
+# eta P (col 3), V_s (col 4), r_0 (col 5), alpha (col 6), rho (col 7), C_p (col 8), T_l-T_0 (col 11)
+# e* (last column)
+COL_INDICES = [2, 3, 4, 5, 6, 7, 10] # Corresponding to etaP, Vs, r0, alpha, rho, cp, Tl-T0
+QUANTITY_NAMES = ['etaP', 'Vs', 'r0', 'alpha', 'rho', 'Cp', 'Tl-T0']
+TARGET_COL_INDEX = -1 # e*
+
+# Define the dimensional matrix D for [M, L, T, Theta]
+# Quantities order: [etaP, Vs, r0, alpha, rho, Cp, Tl-T0]
+# Dimensions:
+# M: Mass
+# L: Length
+# T: Time
+# Theta: Temperature
+DIMENSIONAL_MATRIX = np.array([
+    # etaP Vs r0 alpha rho Cp Tl-T0
+    [1, 0, 0, 0, 1, 0, 0],  # M
+    [2, 1, 1, 2, -3, 2, 0], # L
+    [-3, -1, 0, -1, 0, -2, 0], # T
+    [0, 0, 0, 0, 0, -1, 1]  # Theta
+])
+
+# Define the set of possible rational exponents
+# Denominators up to 4, integers from -12 to 12 (to cover -3 to 3 with quarters)
+possible_exponents_raw = np.array([k/d for d in [1, 2, 3, 4] for k in range(-12, 13)])
+possible_exponents = np.unique(possible_exponents_raw[np.abs(possible_exponents_raw) <= 3])
+# Sort for consistent iteration
+possible_exponents.sort()
+
+# Tolerance for floating point comparisons when rounding exponents
+EXPONENT_TOLERANCE = 1e-5
+
+# Helper function to round a value to the nearest in a set of possible rational exponents
+def round_to_nearest_rational(value, rational_set, tolerance):
+    # Find the index of the closest value in the rational_set
+    idx = np.argmin(np.abs(rational_set - value))
+    rounded_value = rational_set[idx]
+    # Check if the rounded value is within tolerance
+    if np.abs(value - rounded_value) < tolerance:
+        return rounded_value
+    return None # Indicate that no suitable rational number was found within tolerance
+
+# Main problem-solving process
+def solve_dimensional_analysis():
+    # Load data
+    # Ensure only use # for annotations to explain each section of the code
+    df = pd.read_csv(FILE_PATH)
+
+    # Extract relevant columns
+    # Ensure only use # for annotations to explain each section of the code
+    X_data = df.iloc[:, COL_INDICES].values
+    y_data = df.iloc[:, TARGET_COL_INDEX].values
+
+    # Handle potential zero or negative values by taking log
+    # Ensure only use # for annotations to explain each section of the code
+    # Add a small epsilon to avoid log(0) if any values are exactly zero, though physical quantities are usually positive.
+    # Filter out rows where any value is non-positive before log transformation.
+    positive_mask = (X_data > 0).all(axis=1) & (y_data > 0)
+    X_data_positive = X_data[positive_mask]
+    y_data_positive = y_data[positive_mask]
+
+    if X_data_positive.shape[0] == 0:
+        print("Error: No positive data points found for log transformation. Exiting.")
+        return
+
+    log_X_data = np.log(X_data_positive)
+    log_y_data = np.log(y_data_positive)
+
+    # Define best R-squared and corresponding exponents
+    # Ensure only use # for annotations to explain each section of the code
+    best_r_squared = -1.0
+    best_exponents = None
+    best_pi_values = None
+    best_model = None
+
+    # Define sub-matrices for dependent and independent variables
+    # Exponents order: [a, b, c, d, e, f, g] for [etaP, Vs, r0, alpha, rho, Cp, Tl-T0]
+    # Independent variables for grid search: c (r0), d (alpha)
+    # Fixed variable: b (Vs)
+    # Dependent variables: a (etaP), e (rho), f (Cp), g (Tl-T0)
+
+    # D_dep corresponds to columns for [etaP, rho, Cp, Tl-T0] (indices 0, 4, 5, 6)
+    # Ensure only use # for annotations to explain each section of the code
+    D_dep = DIMENSIONAL_MATRIX[:, [0, 4, 5, 6]]
+    # D_ind_cd corresponds to columns for [r0, alpha] (indices 2, 3)
+    # Ensure only use # for annotations to explain each section of the code
+    D_ind_cd = DIMENSIONAL_MATRIX[:, [2, 3]]
+    # D_b corresponds to column for [Vs] (index 1)
+    # Ensure only use # for annotations to explain each section of the code
+    D_b = DIMENSIONAL_MATRIX[:, [1]]
+
+    # Calculate inverse of D_dep once
+    # Ensure only use # for annotations to explain each section of the code
+    inv_D_dep = scipy.linalg.inv(D_dep)
+
+    # Iterate through fixed V_s exponents (b_fixed)
+    # Ensure only use # for annotations to explain each section of the code
+    for b_fixed in [1.0, -1.0]:
+        # Iterate through possible exponents for r0 (c_val)
+        # Ensure only use # for annotations to explain each section of the code
+        for c_val in possible_exponents:
+            # Iterate through possible exponents for alpha (d_val)
+            # Ensure only use # for annotations to explain each section of the code
+            for d_val in possible_exponents:
+                # Calculate the right-hand side of the equation: - (D_ind_cd @ [c_val, d_val]^T + D_b @ b_fixed)
+                # Ensure only use # for annotations to explain each section of the code
+                rhs = - (D_ind_cd @ np.array([c_val, d_val]) + D_b @ np.array([b_fixed]))
+
+                # Solve for the raw dependent exponents [a_raw, e_raw, f_raw, g_raw]
+                # Ensure only use # for annotations to explain each section of the code
+                x_dep_raw = inv_D_dep @ rhs.flatten()
+
+                # Round dependent exponents to nearest rational values
+                # Ensure only use # for annotations to explain each section of the code
+                a_rounded = round_to_nearest_rational(x_dep_raw[0], possible_exponents, EXPONENT_TOLERANCE)
+                e_rounded = round_to_nearest_rational(x_dep_raw[1], possible_exponents, EXPONENT_TOLERANCE)
+                f_rounded = round_to_nearest_rational(x_dep_raw[2], possible_exponents, EXPONENT_TOLERANCE)
+                g_rounded = round_to_nearest_rational(x_dep_raw[3], possible_exponents, EXPONENT_TOLERANCE)
+
+                # Check if all dependent exponents were successfully rounded and within bounds
+                # Ensure only use # for annotations to explain each section of the code
+                if (a_rounded is None or np.abs(a_rounded) > 3 or
+                    e_rounded is None or np.abs(e_rounded) > 3 or
+                    f_rounded is None or np.abs(f_rounded) > 3 or
+                    g_rounded is None or np.abs(g_rounded) > 3):
+                    continue # Skip this combination if not valid
+
+                # Assemble the full set of exponents for the current dimensionless group
+                # Order: [etaP, Vs, r0, alpha, rho, Cp, Tl-T0]
+                # Ensure only use # for annotations to explain each section of the code
+                current_exponents = np.array([a_rounded, b_fixed, c_val, d_val, e_rounded, f_rounded, g_rounded])
+
+                # Calculate the dimensionless quantity Pi for all data points
+                # Ensure only use # for annotations to explain each section of the code
+                # Pi = product(Q_i^x_i)
+                # log(Pi) = sum(x_i * log(Q_i))
+                log_pi_values = np.dot(log_X_data, current_exponents)
+
+                # Reshape for sklearn's LinearRegression
+                # Ensure only use # for annotations to explain each section of the code
+                log_pi_values_reshaped = log_pi_values.reshape(-1, 1)
+
+                # Perform linear regression: log(e*) = m * log(Pi) + c
+                # Ensure only use # for annotations to explain each section of the code
+                model = LinearRegression()
+                model.fit(log_pi_values_reshaped, log_y_data)
+                y_pred_log = model.predict(log_pi_values_reshaped)
+                current_r_squared = r2_score(log_y_data, y_pred_log)
+
+                # Update best R-squared if current one is better
+                # Ensure only use # for annotations to explain each section of the code
+                if current_r_squared > best_r_squared:
+                    best_r_squared = current_r_squared
+                    best_exponents = current_exponents
+                    best_pi_values = np.exp(log_pi_values) # Convert back to Pi values
+                    best_model = model
+
+    # Detailed result printing
+    # Ensure only use # for annotations to explain each section of the code
+    print("--- Dimensional Analysis Results ---")
+    if best_exponents is not None:
+        print(f"Optimal R-squared: {best_r_squared:.4f}")
+        print("\nOptimal Dimensionless Quantity (Pi) Exponents:")
+        exponent_str = []
+        for i, name in enumerate(QUANTITY_NAMES):
+            exp = best_exponents[i]
+            if exp != 0:
+                exponent_str.append(f"{name}^{{{exp}}}")
+            print(f"  {name}: {exp:.4f}")
+
+        pi_formula = " * ".join(exponent_str)
+        print(f"\nPi Formula: Pi = {pi_formula}")
+
+        # Print the linear regression model parameters for log-log plot
+        # Ensure only use # for annotations to explain each section of the code
+        if best_model:
+            print(f"\nLinear Regression Model (log(e*) vs log(Pi)):")
+            print(f"  Slope (m): {best_model.coef_[0]:.4f}")
+            print(f"  Intercept (log(K)): {best_model.intercept_:.4f}")
+            print(f"  Equivalent Power Law: e* = {np.exp(best_model.intercept_):.4f} * Pi^{best_model.coef_[0]:.4f}")
+
+        # Plotting results
+        # Ensure only use # for annotations to explain each section of the code
+        plt.figure(figsize=(12, 6))
+
+        # Plot 1: log(e*) vs log(Pi)
+        # Ensure only use # for annotations to explain each section of the code
+        plt.subplot(1, 2, 1)
+        plt.scatter(np.log(best_pi_values), log_y_data, alpha=0.7, label='Data points')
+        plt.plot(np.log(best_pi_values), best_model.predict(np.log(best_pi_values).reshape(-1, 1)), color='red', label='Linear Fit')
+        plt.title(f'log(e*) vs log(Optimal Pi) (R²={best_r_squared:.4f})')
+        plt.xlabel('log(Optimal Pi)')
+        plt.ylabel('log(e*)')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.legend()
+
+        # Plot 2: e* vs Pi (original scale)
+        # Ensure only use # for annotations to explain each section of the code
+        plt.subplot(1, 2, 2)
+        plt.scatter(best_pi_values, y_data_positive, alpha=0.7, label='Data points')
+        # For the original scale plot, we can use the power law derived from the log-log fit
+        x_fit = np.linspace(best_pi_values.min(), best_pi_values.max(), 100)
+        y_fit = np.exp(best_model.intercept_) * (x_fit ** best_model.coef_[0])
+        plt.plot(x_fit, y_fit, color='red', label='Power Law Fit')
+        plt.title(f'e* vs Optimal Pi (Original Scale)')
+        plt.xlabel('Optimal Pi')
+        plt.ylabel('e*')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.legend()
+
+        plt.tight_layout()
+        plt.savefig('optimal_dimensionless_quantity_correlation.png')
+        # plt.show() # Do not use plt.show() as per instructions
+        print("\nPlots saved to 'optimal_dimensionless_quantity_correlation.png'")
+
+    else:
+        print("No valid dimensionless quantity found within the specified constraints.")
+
+# Execute the problem-solving function
+# Ensure only use # for annotations to explain each section of the code
+if __name__ == "__main__":
+    solve_dimensional_analysis()
+```
+****************************************

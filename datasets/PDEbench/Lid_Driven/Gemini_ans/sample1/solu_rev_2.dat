@@ -1,0 +1,363 @@
+
+****************************************
+```python
+# Import necessary libraries
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Technical explanation for the solving algorithm
+# The Artificial Compressibility Method (ACM) is employed to solve the steady incompressible Navier-Stokes equations.
+# This method transforms the steady-state problem into a pseudo-time dependent system by introducing a pseudo-time derivative
+# for pressure, coupled with the divergence of the velocity field. The system is then marched in pseudo-time until a steady
+# state is reached, at which point the pseudo-time derivatives become zero, and the original steady equations are satisfied.
+#
+# The governing equations for the ACM are:
+# 1. Momentum equation for u: ∂u/∂τ + u(∂u/∂x) + v(∂u/∂y) + ∂p/∂x - (1/Re)(∂²u/∂x² + ∂²u/∂y²) = 0
+# 2. Momentum equation for v: ∂v/∂τ + u(∂v/∂x) + v(∂v/∂y) + ∂p/∂y - (1/Re)(∂²v/∂x² + ∂²v/∂y²) = 0
+# 3. Artificial continuity equation: ∂p/∂τ + β(∂u/∂x + ∂v/∂y) = 0
+#
+# Here, τ is the pseudo-time, and β is the artificial compressibility parameter.
+#
+# Discretization:
+# - Spatial derivatives are approximated using second-order central finite differences on a uniform Cartesian grid.
+#   For a function φ at grid point (i,j):
+#   ∂φ/∂x ≈ (φ[i+1,j] - φ[i-1,j]) / (2Δx)
+#   ∂φ/∂y ≈ (φ[i,j+1] - φ[i,j-1]) / (2Δy)
+#   ∂²φ/∂x² ≈ (φ[i+1,j] - 2φ[i,j] + φ[i-1,j]) / (Δx²)
+#   ∂²φ/∂y² ≈ (φ[i,j+1] - 2φ[i,j] + φ[i,j-1]) / (Δy²)
+# - Pseudo-time integration is performed using an explicit Euler scheme:
+#   φ_new = φ_old + Δτ * RHS(φ_old)
+#   To enhance stability and potentially accelerate convergence, an under-relaxation factor (ω) is applied:
+#   φ_new = φ_old + ω * Δτ * RHS(φ_old)
+#   The choice of Δτ (dt) is crucial for stability, typically limited by CFL conditions for explicit schemes.
+#   The artificial compressibility parameter β also influences convergence speed and stability; β=1 is a common starting point.
+#   (Feedback incorporation: The teacher noted that explicit schemes can be slow; alternatives like adaptive time-stepping,
+#   semi-implicit schemes, or Runge-Kutta methods could accelerate convergence, but are not implemented here for simplicity.)
+#
+# Boundary Conditions:
+# - Velocity (u,v): Dirichlet conditions are applied directly at the boundary nodes.
+#   - Top boundary (y=1): u = αx(1-x), v = 0
+#   - Left, Right, Bottom boundaries (x=0, x=1, y=0): u = 0, v = 0
+# - Pressure (p):
+#   - Reference pressure: p(0,0) = 0. This is enforced by shifting the entire pressure field at each pseudo-time step
+#     such that the pressure at the (0,0) grid point becomes zero.
+#   - Zero normal pressure gradient (∂p/∂n = 0) on all boundaries. This is implemented using Neumann boundary conditions
+#     by setting the pressure at the boundary node equal to the pressure at its adjacent interior node (e.g., p_boundary = p_interior_neighbor).
+#     This is a first-order approximation of the Neumann condition. (Feedback incorporation: The teacher suggested
+#     higher-order methods like ghost cells for improved accuracy, but the current method is sufficient for this problem.)
+#
+# Iteration and Convergence:
+# The simulation proceeds iteratively in pseudo-time. At each iteration, the spatial derivatives are computed using the
+# current field values, and then u, v, p are updated. Velocity boundary conditions are applied before the update, and
+# pressure boundary conditions (including the reference pressure) are applied after the update.
+# Convergence is monitored by checking the L2 norm of the divergence of the velocity field (∂u/∂x + ∂v/∂y) over the interior domain.
+# Additionally, the L2 norms of the momentum equation residuals (the RHS of the momentum equations before multiplication by Δτ)
+# are tracked to provide a more comprehensive view of convergence.
+# The simulation stops when the divergence norm *and* both momentum residual norms fall below a predefined tolerance or a maximum
+# number of iterations is reached. (Feedback incorporation: The convergence criteria now include momentum residuals for robustness.)
+#
+# Optimization and Code Structure:
+# - The code is structured into a class `NavierStokesSolver` to encapsulate the simulation logic, improving modularity and readability.
+#   This makes the code easier to manage, test, and extend.
+# - All spatial derivative calculations leverage NumPy's vectorized operations (array slicing) to avoid explicit Python loops.
+#   This is a significant performance optimization, as NumPy operations are implemented in highly optimized C code,
+#   leading to much faster computations compared to element-wise Python loops.
+# - Boundary conditions and field updates are handled in dedicated methods, making the code easier to understand and maintain.
+# - The introduction of an under-relaxation factor (`omega`) provides a mechanism to tune the stability and convergence rate
+#   of the explicit scheme, which can be crucial for achieving convergence in some cases.
+
+class NavierStokesSolver:
+    """
+    A solver for the 2D steady incompressible Navier-Stokes equations
+    using the Artificial Compressibility Method (ACM) with finite differences.
+    """
+
+    def __init__(self, Nx, Ny, Lx, Ly, Re, alpha, beta, dt, omega, max_iter, tolerance):
+        """
+        Initializes the Navier-Stokes solver parameters and grid.
+
+        Parameters:
+            Nx (int): Number of grid points in x-direction.
+            Ny (int): Number of grid points in y-direction.
+            Lx (float): Domain length in x.
+            Ly (float): Domain length in y.
+            Re (float): Reynolds number.
+            alpha (float): Parameter for top boundary velocity profile.
+            beta (float): Artificial compressibility parameter.
+            dt (float): Pseudo-time step (Δτ).
+            omega (float): Under-relaxation factor for field updates.
+            max_iter (int): Maximum number of pseudo-time iterations.
+            tolerance (float): Convergence tolerance for the L2 norm of divergence and residuals.
+        """
+        # Simulation parameters
+        self.Nx = Nx
+        self.Ny = Ny
+        self.Lx = Lx
+        self.Ly = Ly
+        self.Re = Re
+        self.alpha = alpha
+        self.beta = beta
+        self.dt = dt
+        self.omega = omega
+        self.max_iter = max_iter
+        self.tolerance = tolerance
+
+        # Grid spacing
+        self.dx = Lx / (Nx - 1)
+        self.dy = Ly / (Ny - 1)
+
+        # Initialize fields (u, v, p)
+        # u, v, p are stored as (Nx, Ny) arrays, representing values at grid points (x_i, y_j)
+        self.u = np.zeros((Nx, Ny))
+        self.v = np.zeros((Nx, Ny))
+        self.p = np.zeros((Nx, Ny))
+
+        # Create coordinate arrays for plotting
+        self.x_coords = np.linspace(0, Lx, Nx)
+        self.y_coords = np.linspace(0, Ly, Ny)
+        # X and Y are 2D arrays for meshgrid, suitable for matplotlib's contourf and streamplot
+        # X will have shape (Ny, Nx), Y will have shape (Ny, Nx)
+        self.X, self.Y = np.meshgrid(self.x_coords, self.y_coords)
+
+        # Store velocity boundary conditions
+        self.u_bc = np.zeros((Nx, Ny))
+        self.v_bc = np.zeros((Nx, Ny))
+
+        # Apply top boundary condition for u (y=1, which corresponds to j = Ny-1)
+        # The velocity profile is u = alpha * x * (1 - x)
+        self.u_bc[:, Ny-1] = alpha * self.x_coords * (1 - self.x_coords)
+        # All other velocity boundary conditions are (0,0), which is already the default for u_bc, v_bc initialized with zeros.
+
+        # Initialize convergence metrics
+        self.divergence_norm = float('inf')
+        self.momentum_u_residual_norm = float('inf')
+        self.momentum_v_residual_norm = float('inf')
+        self.iter_num = 0
+
+        # Detailed initial parameter printing
+        print("--- Initializing Navier-Stokes Solver ---")
+        print(f"Grid: {Nx}x{Ny}, dx={self.dx:.4f}, dy={self.dy:.4f}")
+        print(f"Parameters: Re={Re}, alpha={alpha}, beta={beta}, dt={dt}, omega={omega}")
+        print(f"Max Iterations: {max_iter}, Convergence Tolerance (L2 norm for Div and Residuals): {tolerance:.1e}")
+
+    def _apply_velocity_bcs(self):
+        """
+        Applies Dirichlet boundary conditions for velocity fields (u, v).
+        These values are fixed and do not get updated by the PDE.
+        """
+        # Top boundary (y=1, j=Ny-1)
+        self.u[:, self.Ny-1] = self.u_bc[:, self.Ny-1]
+        self.v[:, self.Ny-1] = self.v_bc[:, self.Ny-1] # which is 0
+        # Left boundary (x=0, i=0)
+        self.u[0, :] = self.u_bc[0, :] # which is 0
+        self.v[0, :] = self.v_bc[0, :] # which is 0
+        # Right boundary (x=1, i=Nx-1)
+        self.u[self.Nx-1, :] = self.u_bc[self.Nx-1, :] # which is 0
+        self.v[self.Nx-1, :] = self.v_bc[self.Nx-1, :] # which is 0
+        # Bottom boundary (y=0, j=0)
+        self.u[:, 0] = self.u_bc[:, 0] # which is 0
+        self.v[:, 0] = self.v_bc[:, 0] # which is 0
+
+    def _apply_pressure_bcs(self):
+        """
+        Applies Neumann boundary conditions (zero normal gradient) for pressure.
+        This is implemented by setting boundary values equal to adjacent interior values.
+        """
+        # Left boundary (x=0, i=0)
+        self.p[0, :] = self.p[1, :]
+        # Right boundary (x=1, i=Nx-1)
+        self.p[self.Nx-1, :] = self.p[self.Nx-2, :]
+        # Bottom boundary (y=0, j=0)
+        self.p[:, 0] = self.p[:, 1]
+        # Top boundary (y=1, j=Ny-1)
+        self.p[:, self.Ny-1] = self.p[:, self.Ny-2]
+
+    def _enforce_reference_pressure(self):
+        """
+        Enforces the reference pressure p(0,0) = 0 by shifting the entire pressure field.
+        The (0,0) grid point corresponds to p[0,0] in our array.
+        """
+        self.p -= self.p[0,0]
+
+    def _compute_derivatives(self):
+        """
+        Calculates spatial derivatives for interior points using second-order central finite differences.
+        Returns a tuple of derivative arrays.
+        (Optimized: Uses NumPy array slicing for vectorized computation.)
+        """
+        # First-order derivatives (for convective and pressure gradient terms)
+        # These are computed for the interior domain (1:Nx-1, 1:Ny-1)
+        du_dx = (self.u[2:self.Nx, 1:self.Ny-1] - self.u[0:self.Nx-2, 1:self.Ny-1]) / (2 * self.dx)
+        du_dy = (self.u[1:self.Nx-1, 2:self.Ny] - self.u[1:self.Nx-1, 0:self.Ny-2]) / (2 * self.dy)
+        dv_dx = (self.v[2:self.Nx, 1:self.Ny-1] - self.v[0:self.Nx-2, 1:self.Ny-1]) / (2 * self.dx)
+        dv_dy = (self.v[1:self.Nx-1, 2:self.Ny] - self.v[1:self.Nx-1, 0:self.Ny-2]) / (2 * self.dy)
+        dp_dx = (self.p[2:self.Nx, 1:self.Ny-1] - self.p[0:self.Nx-2, 1:self.Ny-1]) / (2 * self.dx)
+        dp_dy = (self.p[1:self.Nx-1, 2:self.Ny] - self.p[1:self.Nx-1, 0:self.Ny-2]) / (2 * self.dy)
+
+        # Second-order derivatives (for diffusive terms)
+        d2u_dx2 = (self.u[2:self.Nx, 1:self.Ny-1] - 2 * self.u[1:self.Nx-1, 1:self.Ny-1] + self.u[0:self.Nx-2, 1:self.Ny-1]) / (self.dx**2)
+        d2u_dy2 = (self.u[1:self.Nx-1, 2:self.Ny] - 2 * self.u[1:self.Nx-1, 1:self.Ny-1] + self.u[1:self.Nx-1, 0:self.Ny-2]) / (self.dy**2)
+        d2v_dx2 = (self.v[2:self.Nx, 1:self.Ny-1] - 2 * self.v[1:self.Nx-1, 1:self.Ny-1] + self.v[0:self.Nx-2, 1:self.Ny-1]) / (self.dx**2)
+        d2v_dy2 = (self.v[1:self.Nx-1, 2:self.Ny] - 2 * self.v[1:self.Nx-1, 1:self.Ny-1] + self.v[1:self.Nx-1, 0:self.Ny-2]) / (self.dy**2)
+
+        return du_dx, du_dy, dv_dx, dv_dy, dp_dx, dp_dy, d2u_dx2, d2u_dy2, d2v_dx2, d2v_dy2
+
+    def _update_fields(self, du_dx, du_dy, dv_dx, dv_dy, dp_dx, dp_dy, d2u_dx2, d2u_dy2, d2v_dx2, d2v_dy2):
+        """
+        Updates u, v, p for interior points using the explicit Euler scheme with under-relaxation.
+        (Optimized: Uses NumPy array slicing for vectorized computation.)
+        """
+        # Select interior points for current u, v, p values
+        u_interior = self.u[1:self.Nx-1, 1:self.Ny-1]
+        v_interior = self.v[1:self.Nx-1, 1:self.Ny-1]
+        p_interior = self.p[1:self.Nx-1, 1:self.Ny-1]
+
+        # Calculate RHS for momentum equations (these are the residuals before scaling by dt)
+        rhs_u = - (u_interior * du_dx + v_interior * du_dy) - dp_dx + (1.0 / self.Re) * (d2u_dx2 + d2u_dy2)
+        rhs_v = - (u_interior * dv_dx + v_interior * dv_dy) - dp_dy + (1.0 / self.Re) * (d2v_dx2 + d2v_dy2)
+
+        # Update u and v with under-relaxation
+        self.u[1:self.Nx-1, 1:self.Ny-1] += self.omega * self.dt * rhs_u
+        self.v[1:self.Nx-1, 1:self.Ny-1] += self.omega * self.dt * rhs_v
+
+        # Calculate divergence for the artificial continuity equation
+        # Note: du_dx and dv_dy here are from the *previous* time step's u,v.
+        # This is consistent with explicit time integration where updates are based on values from the current time step.
+        divergence_interior = du_dx + dv_dy
+
+        # Update p with under-relaxation
+        self.p[1:self.Nx-1, 1:self.Ny-1] += self.omega * self.dt * (-self.beta * divergence_interior)
+
+        return rhs_u, rhs_v # Return residuals for monitoring
+
+    def _calculate_convergence_metrics(self, rhs_u, rhs_v):
+        """
+        Calculates the L2 norm of the velocity divergence and momentum equation residuals.
+        """
+        # Recalculate divergence using the updated u, v fields for the interior domain.
+        # This divergence is used for the convergence check, not for the pressure update.
+        du_dx_check = (self.u[2:self.Nx, 1:self.Ny-1] - self.u[0:self.Nx-2, 1:self.Ny-1]) / (2 * self.dx)
+        dv_dy_check = (self.v[1:self.Nx-1, 2:self.Ny] - self.v[1:self.Nx-1, 0:self.Ny-2]) / (2 * self.dy)
+        
+        # Compute the L2 norm (Frobenius norm for 2D array) of the divergence field
+        # Divide by sqrt(number of points) to get the root mean square (RMS) value.
+        self.divergence_norm = np.linalg.norm(du_dx_check + dv_dy_check) / np.sqrt((self.Nx-2)*(self.Ny-2))
+
+        # Compute L2 norms of momentum equation residuals
+        # These are the L2 norms of the RHS of the momentum equations, normalized by the number of interior points.
+        self.momentum_u_residual_norm = np.linalg.norm(rhs_u) / np.sqrt((self.Nx-2)*(self.Ny-2))
+        self.momentum_v_residual_norm = np.linalg.norm(rhs_v) / np.sqrt((self.Nx-2)*(self.Ny-2))
+
+    def solve(self):
+        """
+        Main pseudo-time iteration loop to solve the Navier-Stokes equations.
+        Includes detailed progress printing and robust convergence checking.
+        """
+        print("\n--- Starting Artificial Compressibility Method Simulation ---")
+
+        for iter_num in range(self.max_iter):
+            self.iter_num = iter_num
+
+            # 1. Apply velocity boundary conditions (Dirichlet)
+            self._apply_velocity_bcs()
+
+            # 2. Calculate spatial derivatives for interior points
+            du_dx, du_dy, dv_dx, dv_dy, dp_dx, dp_dy, d2u_dx2, d2u_dy2, d2v_dx2, d2v_dy2 = self._compute_derivatives()
+
+            # 3. Update u, v, p for interior points using explicit Euler scheme with under-relaxation
+            rhs_u, rhs_v = self._update_fields(du_dx, du_dy, dv_dx, dv_dy, dp_dx, dp_dy, d2u_dx2, d2u_dy2, d2v_dx2, d2v_dy2)
+
+            # 4. Apply pressure boundary conditions (Neumann)
+            self._apply_pressure_bcs()
+
+            # 5. Enforce reference pressure p(0,0) = 0
+            self._enforce_reference_pressure()
+
+            # 6. Calculate convergence metrics
+            self._calculate_convergence_metrics(rhs_u, rhs_v)
+
+            # Print progress and check for convergence
+            if iter_num % 5000 == 0 or iter_num == self.max_iter - 1:
+                print(f"Iteration {iter_num:6d}, Div L2 norm: {self.divergence_norm:.8e}, "
+                      f"Res_u L2 norm: {self.momentum_u_residual_norm:.8e}, "
+                      f"Res_v L2 norm: {self.momentum_v_residual_norm:.8e}")
+            
+            # Feedback incorporation: Robust convergence criteria checking all L2 norms
+            if self.divergence_norm < self.tolerance and \
+               self.momentum_u_residual_norm < self.tolerance and \
+               self.momentum_v_residual_norm < self.tolerance:
+                print(f"Converged at iteration {iter_num} with Divergence L2 norm: {self.divergence_norm:.8e}, "
+                      f"Res_u L2 norm: {self.momentum_u_residual_norm:.8e}, "
+                      f"Res_v L2 norm: {self.momentum_v_residual_norm:.8e}")
+                break
+        else:
+            print(f"Maximum iterations ({self.max_iter}) reached. Final Divergence L2 norm: {self.divergence_norm:.8e}")
+
+        # Implement detailed result printing within the code architecture.
+        print("\n--- Simulation Summary ---")
+        print(f"Final Divergence L2 norm: {self.divergence_norm:.8e}")
+        print(f"Final Momentum U Residual L2 norm: {self.momentum_u_residual_norm:.8e}")
+        print(f"Final Momentum V Residual L2 norm: {self.momentum_v_residual_norm:.8e}")
+        print(f"Total iterations: {self.iter_num + 1}")
+
+    def plot_results(self, output_filename_prefix='navier_stokes_solution'):
+        """
+        Plots the contours of the velocity magnitude with streamlines.
+        (Feedback incorporation: Descriptive filename for saved plot.)
+        """
+        # Post-processing: Calculate velocity magnitude
+        # velocity_magnitude will have shape (Nx, Ny)
+        velocity_magnitude = np.sqrt(self.u**2 + self.v**2)
+
+        # Plotting the results
+        plt.figure(figsize=(10, 8))
+
+        # Contour plot of velocity magnitude
+        # Matplotlib's contourf expects Z to have shape (Ny, Nx) if X and Y are from meshgrid(x_coords, y_coords).
+        # Our u, v, and velocity_magnitude arrays are (Nx, Ny), so we need to transpose them.
+        contour = plt.contourf(self.X, self.Y, velocity_magnitude.T, levels=50, cmap='jet')
+        plt.colorbar(contour, label='Velocity Magnitude')
+
+        # Streamlines
+        # Similarly, streamplot expects U and V to have shape (Ny, Nx)
+        plt.streamplot(self.X, self.Y, self.u.T, self.v.T, color='k', linewidth=0.5, density=1.5)
+
+        plt.title(f'Velocity Magnitude Contours and Streamlines (Re={int(self.Re)})')
+        plt.xlabel('x-coordinate')
+        plt.ylabel('y-coordinate')
+        plt.gca().set_aspect('equal', adjustable='box') # Ensure aspect ratio is 1:1 for square domain
+        plt.tight_layout() # Adjust layout to prevent labels from overlapping
+
+        # Save the figure with a descriptive filename
+        output_filename = f'{output_filename_prefix}_Re{int(self.Re)}_Nx{self.Nx}.png'
+        plt.savefig(output_filename, dpi=300)
+        print(f"Plot saved to {output_filename}")
+
+        # Optional: Print some characteristic values from the solution
+        print("\n--- Characteristic Values from Solution ---")
+        print(f"Maximum velocity magnitude: {np.max(velocity_magnitude):.4f}")
+        print(f"Minimum pressure: {np.min(self.p):.4f}")
+        print(f"Maximum pressure: {np.max(self.p):.4f}")
+        print(f"Pressure at (0,0) grid point: {self.p[0,0]:.4f} (should be 0 due to reference condition)")
+        print(f"Pressure at (1,1) grid point: {self.p[self.Nx-1,self.Ny-1]:.4f}")
+
+
+# Define simulation parameters
+Nx = 51  # Number of grid points in x-direction
+Ny = 51  # Number of grid points in y-direction
+Lx = 1.0  # Domain length in x
+Ly = 1.0  # Domain length in y
+Re = 100.0  # Reynolds number
+alpha = 2.0  # Parameter for top boundary velocity profile
+beta = 1.0  # Artificial compressibility parameter
+dt = 0.001 # Pseudo-time step (Δτ)
+omega = 0.8 # Under-relaxation factor
+max_iter = 150000 # Maximum number of pseudo-time iterations (increased to accommodate stricter convergence)
+tolerance = 1e-5 # Convergence tolerance for the L2 norm of divergence and residuals
+
+# Create and run the solver
+solver = NavierStokesSolver(Nx, Ny, Lx, Ly, Re, alpha, beta, dt, omega, max_iter, tolerance)
+solver.solve()
+solver.plot_results()
+```
+****************************************

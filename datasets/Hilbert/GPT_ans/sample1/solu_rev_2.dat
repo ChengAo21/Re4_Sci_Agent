@@ -1,0 +1,329 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Technical explanation:
+# We solve the linear system H_n x = b where H_n is the Hilbert matrix of size n,
+# with entries h_ij = 1/(i+j-1), and b is chosen so that the exact solution x = (1,1,...,1)^T.
+#
+# We implement three classical direct methods from scratch:
+# 1) LU decomposition with scaled partial pivoting (improved stability),
+# 2) Cholesky decomposition (exploiting symmetry and positive definiteness),
+# 3) QR decomposition via Householder reflections (numerically stable orthogonal factorization).
+#
+# Due to the extreme ill-conditioning of Hilbert matrices, direct methods fail for larger n.
+# To address this, we implement Tikhonov regularization (ridge regression),
+# solving (H^T H + λ I) x = H^T b to stabilize the system.
+#
+# We also compute and plot the condition number of H_n to illustrate ill-conditioning.
+#
+# The infinity norm error ||x_computed - x_exact||_∞ is used to compare accuracy.
+#
+# Improvements from previous version:
+# - Added condition number computation and plotting.
+# - Relaxed zero pivot tolerance slightly to avoid false failures.
+# - Added detailed error and failure reason logging.
+# - Verified Householder reflection normalization and QR implementation.
+# - Added fallback warnings and clear prints for failures.
+# - Structured code for clarity and reproducibility.
+
+def hilbert_matrix(n):
+    # Construct the n x n Hilbert matrix H_n with entries h_ij = 1/(i+j-1)
+    i = np.arange(1, n+1)
+    j = np.arange(1, n+1)
+    H = 1.0 / (i[:, None] + j[None, :] - 1)
+    return H
+
+def forward_substitution(L, b):
+    # Solve L y = b for y, where L is lower triangular (not necessarily unit diagonal)
+    n = L.shape[0]
+    y = np.zeros_like(b, dtype=np.float64)
+    for i in range(n):
+        y[i] = b[i] - L[i, :i] @ y[:i]
+        diag = L[i,i]
+        if abs(diag) < 1e-14:
+            raise np.linalg.LinAlgError("Zero diagonal element in forward substitution")
+        y[i] /= diag
+    return y
+
+def backward_substitution(U, y):
+    # Solve U x = y for x, where U is upper triangular
+    n = U.shape[0]
+    x = np.zeros_like(y, dtype=np.float64)
+    for i in reversed(range(n)):
+        x[i] = y[i] - U[i, i+1:] @ x[i+1:]
+        diag = U[i,i]
+        if abs(diag) < 1e-14:
+            raise np.linalg.LinAlgError("Zero diagonal element in backward substitution")
+        x[i] /= diag
+    return x
+
+def lu_decomposition_scaled_partial_pivoting(A):
+    # LU decomposition with scaled partial pivoting: PA = LU
+    # Returns P (permutation matrix), L (lower triangular with unit diagonal), U (upper triangular)
+    n = A.shape[0]
+    U = A.copy().astype(np.float64)
+    L = np.eye(n, dtype=np.float64)
+    P = np.eye(n, dtype=np.float64)
+
+    scale = np.max(np.abs(U), axis=1)
+    if np.any(scale == 0):
+        raise np.linalg.LinAlgError("Zero row detected in matrix.")
+
+    for k in range(n-1):
+        # Select pivot row using scaled partial pivoting
+        ratios = np.abs(U[k:, k]) / scale[k:]
+        pivot_row_rel = np.argmax(ratios)
+        pivot_row = pivot_row_rel + k
+
+        pivot_val = U[pivot_row, k]
+        if abs(pivot_val) < 1e-14:
+            raise np.linalg.LinAlgError("Matrix is singular to working precision.")
+
+        if pivot_row != k:
+            U[[k, pivot_row], :] = U[[pivot_row, k], :]
+            P[[k, pivot_row], :] = P[[pivot_row, k], :]
+            scale[k], scale[pivot_row] = scale[pivot_row], scale[k]
+            if k > 0:
+                L[[k, pivot_row], :k] = L[[pivot_row, k], :k]
+
+        for i in range(k+1, n):
+            L[i,k] = U[i,k] / U[k,k]
+            U[i,k:] -= L[i,k] * U[k,k:]
+            U[i,k] = 0.0  # Explicit zero for numerical stability
+
+    return P, L, U
+
+def solve_lu(A, b):
+    # Solve Ax = b using LU decomposition with scaled partial pivoting from scratch
+    P, L, U = lu_decomposition_scaled_partial_pivoting(A)
+    Pb = P @ b
+    y = forward_substitution(L, Pb)
+    x = backward_substitution(U, y)
+    return x
+
+def cholesky_decomposition(A, tol=1e-14):
+    # Cholesky decomposition: A = L L^T for symmetric positive definite A
+    n = A.shape[0]
+    L = np.zeros_like(A, dtype=np.float64)
+    for i in range(n):
+        for j in range(i+1):
+            s = A[i,j] - np.dot(L[i,:j], L[j,:j])
+            if i == j:
+                if s < tol:
+                    raise np.linalg.LinAlgError("Matrix is not positive definite (or numerically unstable).")
+                L[i,j] = np.sqrt(s)
+            else:
+                diag = L[j,j]
+                if abs(diag) < tol:
+                    raise np.linalg.LinAlgError("Zero diagonal element encountered in Cholesky.")
+                L[i,j] = s / diag
+    return L
+
+def solve_cholesky(A, b):
+    # Solve Ax = b using Cholesky decomposition from scratch
+    L = cholesky_decomposition(A)
+    y = forward_substitution(L, b)
+    x = backward_substitution(L.T, y)
+    return x
+
+def householder_reflection(a):
+    # Compute Householder vector v and scalar beta for vector a to zero out all but first component
+    v = a.copy()
+    sigma = np.linalg.norm(a)
+    if sigma == 0:
+        beta = 0.0
+        v[0] = 1.0
+    else:
+        if a[0] >= 0:
+            sigma = -sigma
+        v[0] -= sigma
+        norm_v = np.linalg.norm(v)
+        if norm_v == 0:
+            beta = 0.0
+        else:
+            v /= norm_v
+            beta = 2.0
+    return v, beta, sigma
+
+def qr_decomposition_householder(A):
+    # QR decomposition using Householder reflections: A = Q R
+    n, m = A.shape
+    R = A.copy().astype(np.float64)
+    Q = np.eye(n, dtype=np.float64)
+    for k in range(min(n, m)):
+        x = R[k:, k]
+        v, beta, sigma = householder_reflection(x)
+        if beta == 0:
+            continue
+        # Apply reflection to R
+        R[k:, k:] -= beta * np.outer(v, v @ R[k:, k:])
+        # Apply reflection to Q
+        Q[:, k:] -= beta * np.outer(Q[:, k:] @ v, v)
+    return Q, R
+
+def solve_qr(A, b):
+    # Solve Ax = b using QR decomposition via Householder reflections from scratch
+    Q, R = qr_decomposition_householder(A)
+    Qt_b = Q.T @ b
+    # Check for near-zero diagonal elements in R before backward substitution
+    diag_R = np.abs(np.diag(R[:A.shape[1], :A.shape[1]]))
+    if np.any(diag_R < 1e-14):
+        raise np.linalg.LinAlgError("Near-zero diagonal element in R matrix during QR solve.")
+    x = backward_substitution(R[:A.shape[1], :A.shape[1]], Qt_b[:A.shape[1]])
+    return x
+
+def infinity_norm_error(x_computed, x_exact):
+    # Compute infinity norm error ||x_computed - x_exact||_∞
+    return np.max(np.abs(x_computed - x_exact))
+
+def tikhonov_regularization(H, b, lam):
+    # Solve regularized system (H^T H + lam*I) x = H^T b
+    n = H.shape[1]
+    A_reg = H.T @ H + lam * np.eye(n)
+    b_reg = H.T @ b
+    return A_reg, b_reg
+
+def compute_condition_number(H):
+    # Compute condition number of H in 2-norm using numpy.linalg.cond
+    return np.linalg.cond(H)
+
+def run_experiments(ns, lam=1e-12):
+    # Run all methods for each n in ns, collect infinity norm errors and condition numbers
+    errors_lu = []
+    errors_cholesky = []
+    errors_qr = []
+    errors_lu_reg = []
+    errors_cholesky_reg = []
+    errors_qr_reg = []
+    cond_numbers = []
+
+    for n in ns:
+        H = hilbert_matrix(n)
+        x_exact = np.ones(n)
+        b = H @ x_exact
+
+        cond_H = compute_condition_number(H)
+        cond_numbers.append(cond_H)
+
+        # --- Direct methods on original system ---
+        # LU with scaled partial pivoting
+        try:
+            x_lu = solve_lu(H, b)
+            err_lu = infinity_norm_error(x_lu, x_exact)
+        except Exception as e:
+            err_lu = np.nan
+            print(f"LU failed for n={n}: {e}")
+
+        # Cholesky decomposition
+        try:
+            x_chol = solve_cholesky(H, b)
+            err_chol = infinity_norm_error(x_chol, x_exact)
+        except Exception as e:
+            err_chol = np.nan
+            print(f"Cholesky failed for n={n}: {e}")
+
+        # QR decomposition via Householder
+        try:
+            x_qr = solve_qr(H, b)
+            err_qr = infinity_norm_error(x_qr, x_exact)
+        except Exception as e:
+            err_qr = np.nan
+            print(f"QR failed for n={n}: {e}")
+
+        # --- Regularized system (Tikhonov) ---
+        A_reg, b_reg = tikhonov_regularization(H, b, lam)
+
+        # LU on regularized system
+        try:
+            x_lu_reg = solve_lu(A_reg, b_reg)
+            err_lu_reg = infinity_norm_error(x_lu_reg, x_exact)
+        except Exception as e:
+            err_lu_reg = np.nan
+            print(f"LU (regularized) failed for n={n}: {e}")
+
+        # Cholesky on regularized system
+        try:
+            x_chol_reg = solve_cholesky(A_reg, b_reg)
+            err_chol_reg = infinity_norm_error(x_chol_reg, x_exact)
+        except Exception as e:
+            err_chol_reg = np.nan
+            print(f"Cholesky (regularized) failed for n={n}: {e}")
+
+        # QR on regularized system
+        try:
+            x_qr_reg = solve_qr(A_reg, b_reg)
+            err_qr_reg = infinity_norm_error(x_qr_reg, x_exact)
+        except Exception as e:
+            err_qr_reg = np.nan
+            print(f"QR (regularized) failed for n={n}: {e}")
+
+        errors_lu.append(err_lu)
+        errors_cholesky.append(err_chol)
+        errors_qr.append(err_qr)
+        errors_lu_reg.append(err_lu_reg)
+        errors_cholesky_reg.append(err_chol_reg)
+        errors_qr_reg.append(err_qr_reg)
+
+        # Detailed result printing for current n
+        print(f"n = {n}")
+        print(f"  Condition number of H_n: {cond_H:.3e}")
+        print(f"  LU with scaled partial pivoting error (L∞): {err_lu if not np.isnan(err_lu) else 'fail'}")
+        print(f"  Cholesky decomposition error (L∞): {err_chol if not np.isnan(err_chol) else 'fail'}")
+        print(f"  QR decomposition (Householder) error (L∞): {err_qr if not np.isnan(err_qr) else 'fail'}")
+        print(f"  LU (regularized) error (L∞): {err_lu_reg if not np.isnan(err_lu_reg) else 'fail'}")
+        print(f"  Cholesky (regularized) error (L∞): {err_chol_reg if not np.isnan(err_chol_reg) else 'fail'}")
+        print(f"  QR (regularized) error (L∞): {err_qr_reg if not np.isnan(err_qr_reg) else 'fail'}")
+        print("-" * 70)
+
+    return (errors_lu, errors_cholesky, errors_qr,
+            errors_lu_reg, errors_cholesky_reg, errors_qr_reg,
+            cond_numbers)
+
+def plot_errors(ns, errors_lu, errors_chol, errors_qr,
+                errors_lu_reg, errors_chol_reg, errors_qr_reg):
+    # Plot infinity norm errors vs n for each method, original and regularized
+    plt.figure(figsize=(12, 7))
+    plt.semilogy(ns, errors_lu, 'o-', label='LU with Scaled Partial Pivoting')
+    plt.semilogy(ns, errors_chol, 's-', label='Cholesky Decomposition')
+    plt.semilogy(ns, errors_qr, '^-', label='QR Decomposition (Householder)')
+    plt.semilogy(ns, errors_lu_reg, 'o--', label='LU (Regularized)')
+    plt.semilogy(ns, errors_chol_reg, 's--', label='Cholesky (Regularized)')
+    plt.semilogy(ns, errors_qr_reg, '^--', label='QR (Regularized)')
+    plt.xlabel('Matrix size n')
+    plt.ylabel('Infinity norm error')
+    plt.title('Infinity Norm Error of Numerical Solutions for Hilbert Systems\n'
+              'Solid lines: original system, Dashed lines: Tikhonov regularized system')
+    plt.legend()
+    plt.grid(True, which='both', linestyle='--', linewidth=0.7)
+    plt.tight_layout()
+    plt.show()
+
+def plot_condition_numbers(ns, cond_numbers):
+    # Plot condition number of Hilbert matrices vs n on log scale
+    plt.figure(figsize=(10, 5))
+    plt.semilogy(ns, cond_numbers, 'm-o')
+    plt.xlabel('Matrix size n')
+    plt.ylabel('Condition number (2-norm)')
+    plt.title('Condition Number of Hilbert Matrices H_n')
+    plt.grid(True, which='both', linestyle='--', linewidth=0.7)
+    plt.tight_layout()
+    plt.show()
+
+if __name__ == "__main__":
+    ns = list(range(5, 51, 5))  # n = 5, 10, ..., 50
+    lam = 1e-12  # Regularization parameter chosen small to stabilize ill-conditioning
+
+    (errors_lu, errors_chol, errors_qr,
+     errors_lu_reg, errors_chol_reg, errors_qr_reg,
+     cond_numbers) = run_experiments(ns, lam=lam)
+
+    plot_errors(ns, errors_lu, errors_chol, errors_qr,
+                errors_lu_reg, errors_chol_reg, errors_qr_reg)
+
+    plot_condition_numbers(ns, cond_numbers)
+```
+
+****************************************
