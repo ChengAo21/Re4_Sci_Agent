@@ -6,18 +6,14 @@ For more details, see our arXiv preprint [![arXiv](https://img.shields.io/badge/
 
 ## Future work
 ```
-- release streamlit version and employ langchain
+- equipped with a Streamlit-based interactive frontend 
 ```
 
 ## Project Structure
 ```
 src/
-├── utils.py             # General tool functions
-├── FileHandler.py       # File operation
-├── code_executor.py     # Code processing & execution  
-├── llm_agent.py         # Client configuration
-├── prompts_template.py  # Prompt generation
-└── re4_Agent.py         # Workflow
+├── ver_langGraph_     # LangGraph Workflows
+└── ver_pmtEng_        # Prompt Engineering
 ```
 
 ## Contact
