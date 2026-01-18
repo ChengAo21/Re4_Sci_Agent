@@ -4,6 +4,7 @@
 ![schematic](schematic_re4.png)
 
 The proposed agent incorporates a **"Rewriting-Resolution-Review-Revision"** logical chain via three reasoning LLMs (functioning as the Consultant, Reviewer, and Programmer) to solve complex scientific computing problems in a collaborative and interactive manner.
+
 For more details, see our arXiv preprint [![arXiv](https://img.shields.io/badge/arXiv-2305.01582-red.svg)](https://arxiv.org/abs/2305.01582)
 
 ## 🚀 Key Features & Roadmap
