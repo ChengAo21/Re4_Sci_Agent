@@ -15,6 +15,7 @@ For more details, see our arXiv preprint [![arXiv](https://img.shields.io/badge/
 - **Context Management**: Utilizes a shared state graph to manage solution plans, code history, and review feedback across multi-turn agent interactions, improving the coherence of interactions.
 
 - **Multimodal Review**: Enables the Reviewer agent to validate not just code logic but also visual outputs (plots, contours), achieving comprehensive quality control.
+
 - [ ] **Interactive Frontend**: Develop a Streamlit-based UI for easier user interaction (In Progress).
 
 ## 📂 Project Structure
