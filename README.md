@@ -4,19 +4,23 @@ The proposed agent, incorporating a "rewriting-resolution-review-revision" logic
 
 For more details, see our arXiv preprint [![arXiv](https://img.shields.io/badge/arXiv-2305.01582-red.svg)](https://arxiv.org/abs/2305.01582)
 
-## Future work
+## 🚀 Key Features & Roadmap
 ```
-- equipped with a Streamlit-based interactive frontend 
+- **LangGraph Orchestra**: Orchestrates multi-task, multi-step agent workflows (Consultant $\to$ Programmer $\to$ Executor $\to$ Reviewer), ensuring scalability and maintainability.
+- **Multimodal Review**: Enables the Reviewer agent to validate not just code logic but also visual outputs (plots, contours), achieving comprehensive quality control.
+- **Structured Output**: Generates standardized, parsable formats (via Pydantic) to ensure consistency and reusability of intermediate results.
+- **Context Management**: Efficiently manages context for multi-model/multi-turn conversations via MCP, improving the coherence of interactions.
+- [ ] **Interactive Frontend**: Develop a Streamlit-based UI for easier user interaction (In Progress).
 ```
 
-## Project Structure
+## 📂 Project Structure
 ```
 src/
-├── ver_langGraph_     # LangGraph Workflows
-└── ver_pmtEng_        # Prompt Engineering
+├── ipynb_ver     # code in Jupyter Notebook (.ipynb) format
+└── pycodes_ver   # code packaged as Python scripts (.py) format
 ```
 
-## Contact
+## 📧 Contact
 If you have any questions on our work or implementation, feel free to reach out to [chengao23@mails.ucas.ac.cn](mailto:chengao23@mails.ucas.ac.cn)!
 
 If you find this repository useful, please consider giving a star ⭐ and cite our paper.
