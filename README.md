@@ -5,10 +5,10 @@ The proposed agent, incorporating a **"rewriting-resolution-review-revision" log
 For more details, see our arXiv preprint [![arXiv](https://img.shields.io/badge/arXiv-2305.01582-red.svg)](https://arxiv.org/abs/2305.01582)
 
 ## 🚀 Key Features & Roadmap
-- **LangGraph Orchestra**: Orchestrates multi-task, multi-step agent workflows (Consultant $\to$ Programmer $\to$ Executor $\to$ Reviewer), ensuring scalability and maintainability.
-- **Multimodal Review**: Enables the Reviewer agent to validate not just code logic but also visual outputs (plots, contours), achieving comprehensive quality control.
+- **LangGraph Orchestra**: Orchestrates multi-task, multi-step agent workflows, ensuring scalability and maintainability.
 - **Structured Output**: Generates standardized, parsable formats (via Pydantic) to ensure consistency and reusability of intermediate results.
-- **Context Management**: Efficiently manages context for multi-model/multi-turn conversations via MCP, improving the coherence of interactions.
+- **Context Management**: Utilizes a shared state graph to manage code history, and review feedback across multi-turn agent interactions, improving the coherence of interactions.
+- **Multimodal Review**: Enables the Reviewer agent to validate not just code logic but also visual outputs (plots, contours), achieving comprehensive quality control.
 - [ ] **Interactive Frontend**: Develop a Streamlit-based UI for easier user interaction (In Progress).
 
 ## 📂 Project Structure
