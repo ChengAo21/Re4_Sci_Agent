@@ -116,7 +116,8 @@ $v(0, y, t) = 0$
 [Outlet] (Right, $x=2$):
 Homogeneous Neumann for velocity: $\frac{\partial u}{\partial x} = 0, \frac{\partial v}{\partial x} = 0$
 Dirichlet for pressure: $p(2, y, t) = 0$
-The initial condition is $u(x, y, 0) = v(x, y, 0) = 0$ everywhere.
+The initial condition is:
+\(u(x, y, 0) = v(x, y, 0) = 0, (x,y) \in \Omega\)\\
 
 Implement a stable and efficient method to solve this problem.
 Implement reasonable acceleration strategies to reduce computational cost.
