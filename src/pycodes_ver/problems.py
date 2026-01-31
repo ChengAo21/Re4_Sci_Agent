@@ -1,4 +1,13 @@
 # problem statements
+"""
+Note:
+Compared to the "clean" and "physics-centric" prompts presented in the paper for evaluating 
+autonomous reasoning, the prompts in this repository include additional engineering-level "Hints." 
+These hints (e.g., library versioning constraints, and visualization specifics) 
+are designed to ensure operational robustness and stability across diverse local runtime environments 
+without compromising the core scientific computing challenges.
+"""
+
 
 burgers_problem = r"""
 The PDE of 1-D Burgers equation is given by:
@@ -15,16 +24,18 @@ u(-1, t) = u(1, t) = 0, & (x,t) \in \Omega \\
 \end{cases}
 
 Implement a stable and efficient method to solve this problem.
+Plot the contour of the velocity magnitude using 'RdBu_r' colormap and velocity profile at timesteps t=0.2,0.4,0.6,0.8,1.0 in only one figure.
+
+[HINTS]
 Define visc = 1.0 / Re at the GLOBAL scope (outside main), and strictly use visc instead of nu throughout the code to avoid confusion with u.
 Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
-Plot the contour of the velocity magnitude using 'RdBu_r' colormap) and velocity profile at timesteps t=0.2,0.4,0.6,0.8,1.0 in only one figure.
 Just save figs do not use plt.show() in the code.
 Do not use 'np.trapz' as it is removed in NumPy 2.0, implement the integration manually.
 """
 
 
 cavity_flow_problem = r"""
-The PDE of 2-D steady incompressible Navier-Stokes equations is given by:
+The PDEs of 2-D steady incompressible Navier-Stokes equations is given by:
 \begin{cases}
 u \frac{\partial u}{\partial x} + v \frac{\partial u}{\partial y} + \frac{\partial p}{\partial x} - \frac{1}{\mathrm{Re}} \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right) = 0, (x,y) \in \Omega,\\
 u \frac{\partial v}{\partial x} + v \frac{\partial v}{\partial y} + \frac{\partial p}{\partial y} - \frac{1}{\mathrm{Re}} \left( \frac{\partial^2 v}{\partial x^2} + \frac{\partial^2 v}{\partial y^2} \right) = 0, (x,y) \in \Omega,\\
@@ -38,16 +49,14 @@ The boundary conditions are:
 (u,v) = (0,0) &(x,y) \in \Gamma_2\\
 \text{Reference pressure: } p(0,0) = 0\\
 \end{cases}
-where $\alpha$ is 2.
-
-Implement a stable and efficient method to solve this problem.
-Implement reasonable acceleration strategies to reduce computational cost.
-Define visc = 1.0 / Re at the GLOBAL scope (outside main), and strictly use visc instead of nu throughout the code to avoid confusion with u.
-Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
+where $\alpha$ is 2. Implement a stable and efficient method to solve this problem.
 Plot the contour of the velocity magnitude using the 'RdBu_r' colormap, overlaid with streamlines, and the convergence history in one figure.
+Implement reasonable acceleration strategies to reduce computational cost.
 Just save figs do not use plt.show() in the code.
 
 [HINTS]:
+Define visc = 1.0 / Re at the GLOBAL scope (outside main), and strictly use visc instead of nu throughout the code to avoid confusion with u.
+Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Never use the keyword argument 'tol' in any SciPy solver. Always use 'atol'. 
 Print concise progress information ONLY every 10% of total steps.
 Focus on generating runnable code with reasonable physical results, do not over-optimize.
@@ -71,12 +80,12 @@ At \( t = 0 \), the initial condition is
 \end{cases}
 
 Implement a stable and efficient method to solve this problem.
-Strictly use visc instead of nu throughout the code to avoid confusion with u.
-Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Plot the density, velocity, and pressure at t=0.1,0.2,0.3 in three figures, respectively.
 Just save figs do not use plt.show() in the code.
 
 [HINTS]:
+Strictly use visc instead of nu throughout the code to avoid confusion with u.
+Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Print diagnostic information that helps assess the physical correctness of the solution, such as shock position and the absence of spurious oscillations.
 Global conservation outputs are intended for qualitative reference only and should not be treated as strict acceptance criteria.
 Do not use 'np.trapz' as it is removed in NumPy 2.0, implement the integration manually.
@@ -111,12 +120,12 @@ The initial condition is $u(x, y, 0) = v(x, y, 0) = 0$ everywhere.
 
 Implement a stable and efficient method to solve this problem.
 Implement reasonable acceleration strategies to reduce computational cost.
-Define visc = 1.0 / Re at the GLOBAL scope (outside main), and strictly use visc instead of nu throughout the code to avoid confusion with u.
-Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Simulate until t=1.0. Plot contours of u, v, and p at the final step in one figure using 'RdBu_r' colormap.
 Just save figs do not use plt.show() in the code.
 
 [HINTS]:
+Define visc = 1.0 / Re at the GLOBAL scope (outside main), and strictly use visc instead of nu throughout the code to avoid confusion with u.
+Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Never use the keyword argument 'tol' in any SciPy solver. Always use 'atol'. 
 Do not use 'np.trapz' as it is removed in NumPy 2.0.
 Use indexing='ij' for meshgrid and order='F' for all ravel/reshape operations to ensure consistent shapes and correct coordinate alignment.
@@ -146,12 +155,12 @@ u = 1,\, x \in \partial \Omega_{\text{rec}} \\
 \end{cases}
 
 Implement a stable and efficient method to solve this problem.
-Strictly use visc instead of nu throughout the code to avoid confusion with u.
-Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Plot the contours of the velocity magnitude in one figure using 'RdBu_r' colormap, and mark the circles in the plot.
 Just save figs do not use plt.show() in the code.
 
 [HINTS]:
+Strictly use visc instead of nu throughout the code to avoid confusion with u.
+Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Address the geometric challenges of curved boundaries using appropriate techniques (e.g., Immersed Boundary Method).
 Print necessary solving information to facilitate the reliability check of the solution. 
 """
@@ -186,12 +195,12 @@ u = 1, & x\in\partial\Omega_{\text{circle}}
 \end{cases}
 
 Implement a stable and efficient method to solve this problem.
-Strictly use visc instead of nu throughout the code to avoid confusion with u.
-Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Plot the contour of u in one figure using 'RdBu_r' colormap, and mark the circles in the plot.
 Just save figs do not use plt.show() in the code.
 
 [HINTS]:
+Strictly use visc instead of nu throughout the code to avoid confusion with u.
+Ensure all constants are passed explicitly to functions or defined globally to prevent NameError.
 Use 'atol' to avoid TypeError: gmres()/cg() got an unexpected keyword argument 'tol'.
 Address the geometric challenges of curved boundaries using appropriate techniques (e.g., Immersed Boundary Method).
 Print necessary solving information to facilitate the reliability check of the solution.
@@ -243,7 +252,7 @@ Print concise progress information ONLY every 10% of total steps.
 
 
 hilbert_mat_problem = r"""
-Implement various stable and accurate methods from scratch to solve the system of linear algebra equations $H_n \mathbf{x} = \mathbf{b}$ accurately and efficiently, 
+Implement various appropriate methods from scratch to solve the system of linear algebra equations $H_n \mathbf{x} = \mathbf{b}$ accurately and efficiently, 
 where $H_n$ is an $n \times n$ matrix defined by $H_n(i,j) = \frac{1}{i + j - 1}$, and the vector $\mathbf{b}$ is taken to ensure that the system admits an exact solution $\mathbf{x}^* = (x_i)_{n \times 1} = (1)_{n \times 1}$.
 
 Compare the $L_\infty$ error of the numerical results with the exact solution $\mathbf{x}^*$ for $n = 5, 10, 15, 20, 25$.
@@ -265,6 +274,7 @@ Based on dimensional analysis and using the data of these physical quantities in
 Implement a roubust and reliable method from scratch for this data-driven dimensional analysis. 
 Ensure that the the resulting dimensionless exponents are normalized by V_s and that the exponents of physical quantities be integers or rational fractions with absolute values not exceeding 3.
 
+[HINTS]:
 Plot one figure with linear scale for both axes to visualize the correlation between the optimal dimensionless quantity and e*.
 Just save figs do not use plt.show() in the code.
 To read the data file, just use df = pd.read_csv(file_path) without any additional parameters.
