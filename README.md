@@ -24,6 +24,16 @@ src/
 ```
 
 ## 📧 Contact
+This work is presented at the **ICLR 2026 Workshop on AI and Partial Differential Equations (AI&PDE)** [![OpenReview](https://img.shields.io/badge/OpenReview-PMdr3fQpBE-blue.svg)](https://openreview.net/forum?id=PMdr3fQpBE).
 
-If you find this repository useful, please consider giving a star ⭐.
+If you find this repository useful, please consider giving a star ⭐ and cite our conference Workshop paper.
 
+```
+@inproceedings{cheng2026re,
+  title={Re4: Scientific Computing Agent with Rewriting, Resolution, Review and Revision},
+  author={Ao Cheng and Lei Zhang and Guowei He},
+  booktitle={AI&PDE: ICLR 2026 Workshop on AI and Partial Differential Equations},
+  year={2026},
+  url={https://openreview.net/forum?id=PMdr3fQpBE}
+}
+```
