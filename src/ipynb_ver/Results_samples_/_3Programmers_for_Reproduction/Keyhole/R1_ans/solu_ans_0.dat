@@ -1,0 +1,127 @@
+
+****************************************
+```python
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+
+# Load data and extract relevant columns
+file_path = "./dataset_keyhole.csv"
+df = pd.read_csv(file_path)
+
+# Extract required columns (0-indexed positions: 2,3,4,5,6,7,10) and target (last column)
+X = df.iloc[:, [2, 3, 4, 5, 6, 7, 10]].values  # Physical quantities
+y = df.iloc[:, -1].values  # Target e*
+
+# Column names for reference
+var_names = ['etaP', 'Vs', 'r0', 'alpha', 'rho', 'cp', 'Tl-T0']
+
+# Precompute logarithms for efficient calculations
+log_X = np.log(X)
+log_y = np.log(y)
+
+# Define rational exponent range [-3, 3] in steps of 0.5
+exponents = np.arange(-3, 3.1, 0.5)
+n = len(exponents)
+
+# Initialize tracking variables
+best_r2 = -np.inf
+best_exponents = None
+best_model = None
+best_log_Pi = None
+
+# Iterate over possible exponent values for free variables a and f
+for a in exponents:
+    for f in exponents:
+        # Calculate dependent exponents using dimensional constraints
+        e_val = -a
+        g_val = f
+        d_val = -3*a - 2*f - 1
+        c_val = a + 2*f + 2
+        
+        # Check if all exponents are within [-3,3] range
+        if not all(-3 <= x <= 3 for x in [c_val, d_val, e_val, g_val]):
+            continue
+            
+        # Construct full exponent vector [a, b=1, c, d, e, f, g]
+        exp_vec = np.array([a, 1, c_val, d_val, e_val, f, g_val])
+        
+        # Compute log of dimensionless group Π for all data points
+        log_Pi = log_X @ exp_vec
+        
+        # Prepare data for linear regression (log-log space)
+        X_reg = log_Pi.reshape(-1, 1)
+        
+        # Fit linear model
+        model = LinearRegression()
+        model.fit(X_reg, log_y)
+        r2 = model.score(X_reg, log_y)
+        
+        # Update best solution if improved R²
+        if r2 > best_r2:
+            best_r2 = r2
+            best_exponents = exp_vec
+            best_model = model
+            best_log_Pi = log_Pi
+
+# Convert best log_Pi to original space
+best_Pi = np.exp(best_log_Pi)
+
+# Generate predictions for visualization
+Pi_plot = np.linspace(best_Pi.min(), best_Pi.max(), 100)
+log_Pi_plot = np.log(Pi_plot)
+log_e_pred = best_model.predict(log_Pi_plot.reshape(-1, 1))
+e_pred = np.exp(log_e_pred)
+
+# Create readable expression of dimensionless group
+terms = []
+for i, name in enumerate(var_names):
+    exp = best_exponents[i]
+    if np.abs(exp) > 1e-5:  # Skip near-zero exponents
+        if np.isclose(exp, int(exp)):
+            exp_str = f"{int(exp)}" if abs(exp) != 1 else ""
+        else:
+            frac = np.round(exp * 2) / 2  # Convert to nearest 0.5
+            num = int(frac * 2)
+            den = 2
+            exp_str = f"^{{{num}/{den}}}" if num != den else ""
+        terms.append(f"{name}{exp_str}")
+
+expr = " \\cdot ".join(terms)
+
+# Print results
+print("Optimal Dimensionless Group:")
+print(f"Π = {expr}")
+print(f"R² = {best_r2:.6f}")
+print("\nExponent Details:")
+for i, name in enumerate(var_names):
+    print(f"{name}: {best_exponents[i]:.4f}")
+
+# Create visualizations
+plt.figure(figsize=(10, 8))
+
+# Log-log plot
+plt.subplot(2, 1, 1)
+plt.scatter(best_Pi, y, alpha=0.6, edgecolor='k')
+plt.plot(Pi_plot, e_pred, 'r-', linewidth=2)
+plt.xscale('log')
+plt.yscale('log')
+plt.xlabel('Dimensionless Group (Π)')
+plt.ylabel('Keyhole Aspect Ratio (e*)')
+plt.title('Log-Log Correlation')
+plt.grid(True, which="both", ls="-")
+
+# Linear-scale plot
+plt.subplot(2, 1, 2)
+plt.scatter(best_Pi, y, alpha=0.6, edgecolor='k')
+plt.plot(Pi_plot, e_pred, 'r-', linewidth=2)
+plt.xlabel('Dimensionless Group (Π)')
+plt.ylabel('Keyhole Aspect Ratio (e*)')
+plt.title('Linear Correlation')
+plt.grid(True)
+
+plt.tight_layout()
+plt.savefig('dimensionless_group_correlation.png')
+```
+****************************************

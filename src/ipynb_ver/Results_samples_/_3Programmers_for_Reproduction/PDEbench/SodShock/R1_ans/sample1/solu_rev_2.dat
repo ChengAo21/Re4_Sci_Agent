@@ -1,0 +1,235 @@
+
+****************************************
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# PARAMETERS
+gamma = 1.4           # Ratio of specific heats
+t_end = 0.2           # Final simulation time
+N = 500               # Number of grid cells
+nx = N + 4            # Total cells including ghost cells
+xmin, xmax = 0.0, 1.0 # Domain boundaries
+dx = (xmax - xmin)/N  # Grid spacing
+cfl = 0.5             # Courant-Friedrichs-Lewy number
+
+# Create grid (including ghost cells)
+x = np.linspace(xmin - 2*dx + dx/2, xmax + 2*dx - dx/2, nx)
+
+# Initialize primitive variables
+rho = np.where(x < 0.5, 1.0, 0.125)
+u = np.zeros(nx)
+p = np.where(x < 0.5, 1.0, 0.1)
+
+# Convert primitive to conservative variables
+def primitive_to_conservative(rho, u, p, gamma):
+    rho_u = rho * u
+    rho_E = p/(gamma - 1) + 0.5*rho*u**2
+    return np.array([rho, rho_u, rho_E])
+
+# Convert conservative to primitive variables with physical admissibility checks
+def conservative_to_primitive(U, gamma):
+    rho = np.maximum(U[0,:], 1e-10)  # Ensure density positivity
+    u = U[1,:] / rho
+    p = (gamma - 1) * (U[2,:] - 0.5*rho*u**2)
+    p = np.maximum(p, 1e-10)         # Ensure pressure positivity
+    return rho, u, p
+
+# Corrected flux function with proper energy flux formulation
+def flux_function(rho, u, p, gamma):
+    rho_E = p/(gamma-1) + 0.5*rho*u**2  # Total energy per unit volume
+    F_rho = rho * u
+    F_mom = rho * u**2 + p
+    F_energy = u * (rho_E + p)         # Proper energy flux formulation
+    return np.array([F_rho, F_mom, F_energy])
+
+# Standard HLLC Riemann solver based on Toro's formulations
+def hllc_flux(QL, QR, gamma):
+    # Unpack left and right primitive states
+    rhoL, uL, pL = QL
+    rhoR, uR, pR = QR
+    
+    # Compute sound speeds
+    aL = np.sqrt(gamma * pL / rhoL)
+    aR = np.sqrt(gamma * pR / rhoR)
+    
+    # Conservative variables
+    rho_EL = pL/(gamma-1) + 0.5*rhoL*uL**2
+    rho_ER = pR/(gamma-1) + 0.5*rhoR*uR**2
+    UL = np.array([rhoL, rhoL*uL, rho_EL])
+    UR = np.array([rhoR, rhoR*uR, rho_ER])
+    
+    # Flux vectors
+    FL = flux_function(rhoL, uL, pL, gamma)
+    FR = flux_function(rhoR, uR, pR, gamma)
+    
+    # Wave speed estimates (Toro's PVRS approximation)
+    rho_avg = 0.5*(rhoL + rhoR)
+    a_avg = 0.5*(aL + aR)
+    p_star = 0.5*(pL + pR) - 0.5*(uR - uL)*rho_avg*a_avg
+    p_star = max(0.0, p_star)  # Ensure non-negative pressure
+    
+    # Wave speed estimates (Davis simplified)
+    SL = min(uL - aL, uR - aR)
+    SR = max(uL + aL, uR + aR)
+    S_star = (pR - pL + rhoL*uL*(SL - uL) - rhoR*uR*(SR - uR)) / \
+             (rhoL*(SL - uL) - rhoR*(SR - uR))
+    
+    # Intermediate state densities
+    rho_starL = rhoL * (SL - uL)/(SL - S_star)
+    rho_starR = rhoR * (SR - uR)/(SR - S_star)
+    
+    # Compute star state conservative variables
+    U_starL = np.array([
+        rho_starL,
+        rho_starL * S_star,
+        rho_starL * (UL[2]/rhoL + (S_star - uL)*(S_star + pL/(rhoL*(SL - uL))))
+    ])
+    
+    U_starR = np.array([
+        rho_starR,
+        rho_starR * S_star,
+        rho_starR * (UR[2]/rhoR + (S_star - uR)*(S_star + pR/(rhoR*(SR - uR))))
+    ])
+    
+    # Compute flux based on wave positions
+    if SL >= 0:
+        return FL
+    elif SR <= 0:
+        return FR
+    elif S_star >= 0:
+        return FL + SL*(U_starL - UL)
+    else:
+        return FR + SR*(U_starR - UR)
+
+# Optimized vectorized minmod slope limiter
+def minmod(a, b):
+    return 0.5 * (np.sign(a) + np.sign(b)) * np.minimum(np.abs(a), np.abs(b))
+
+# MUSCL reconstruction with vectorized slope limiting
+def muscl_reconstruction(W, dx):
+    # Compute limited slopes
+    dW = np.zeros_like(W)
+    dW_left = (W[:, 1:-1] - W[:, :-2]) / dx
+    dW_right = (W[:, 2:] - W[:, 1:-1]) / dx
+    
+    # Vectorized minmod operation
+    dW[:, 1:-1] = minmod(dW_left, dW_right)
+    
+    # Reconstruct interface states
+    WL = W[:, :-1] + 0.5*dW[:, :-1]*dx
+    WR = W[:, 1:] - 0.5*dW[:, 1:]*dx
+    
+    return WL, WR
+
+# Time step calculation with CFL condition
+def compute_time_step(rho, u, p, gamma, dx, cfl):
+    a = np.sqrt(gamma * p / np.maximum(rho, 1e-10))
+    max_speed = np.max(np.abs(u) + a)
+    return cfl * dx / max_speed
+
+# Transmissive boundary conditions
+def apply_boundary_conditions(U):
+    U[:, 0] = U[:, 2]   # Left ghost cell 0
+    U[:, 1] = U[:, 2]   # Left ghost cell 1
+    U[:, -1] = U[:, -3]  # Right ghost cell N+3
+    U[:, -2] = U[:, -3]  # Right ghost cell N+2
+
+# Main simulation with optimized SSP-RK3 integration
+def main():
+    # Initialize conservative variables
+    U = primitive_to_conservative(rho, u, p, gamma)
+    apply_boundary_conditions(U)
+    
+    # Time integration
+    t = 0.0
+    iteration = 0
+    
+    while t < t_end:
+        # Compute time step
+        rho_temp, u_temp, p_temp = conservative_to_primitive(U, gamma)
+        dt = compute_time_step(rho_temp, u_temp, p_temp, gamma, dx, cfl)
+        dt = min(dt, t_end - t)
+        
+        # SSP-RK3 Stage 1
+        rho1, u1, p1 = conservative_to_primitive(U, gamma)
+        W1 = np.array([rho1, u1, p1])
+        WL, WR = muscl_reconstruction(W1, dx)
+        
+        # Compute interface fluxes
+        F = np.zeros((3, nx-1))
+        for i in range(nx-1):
+            F[:, i] = hllc_flux(WL[:, i], WR[:, i], gamma)
+        
+        # Compute RHS and update
+        rhs = -(F[:, 1:] - F[:, :-1]) / dx
+        U1 = U.copy()
+        U1[:, 2:-2] += dt * rhs[:, 1:-1]
+        apply_boundary_conditions(U1)
+        
+        # SSP-RK3 Stage 2
+        rho2, u2, p2 = conservative_to_primitive(U1, gamma)
+        W2 = np.array([rho2, u2, p2])
+        WL, WR = muscl_reconstruction(W2, dx)
+        
+        for i in range(nx-1):
+            F[:, i] = hllc_flux(WL[:, i], WR[:, i], gamma)
+        
+        rhs = -(F[:, 1:] - F[:, :-1]) / dx
+        U2 = U.copy()
+        U2[:, 2:-2] = 0.75*U[:, 2:-2] + 0.25*(U1[:, 2:-2] + dt * rhs[:, 1:-1])
+        apply_boundary_conditions(U2)
+        
+        # SSP-RK3 Stage 3
+        rho3, u3, p3 = conservative_to_primitive(U2, gamma)
+        W3 = np.array([rho3, u3, p3])
+        WL, WR = muscl_reconstruction(W3, dx)
+        
+        for i in range(nx-1):
+            F[:, i] = hllc_flux(WL[:, i], WR[:, i], gamma)
+        
+        rhs = -(F[:, 1:] - F[:, :-1]) / dx
+        U[:, 2:-2] = (1/3)*U[:, 2:-2] + (2/3)*(U2[:, 2:-2] + dt * rhs[:, 1:-1])
+        apply_boundary_conditions(U)
+        
+        # Update time
+        t += dt
+        iteration += 1
+        
+        # Print diagnostics with additional physical quantities
+        rho_curr, u_curr, p_curr = conservative_to_primitive(U, gamma)
+        print(f"t={t:.4f}, dt={dt:.2e}, Max ρ={np.max(rho_curr):.4f}, "
+              f"Min p={np.min(p_curr):.4f}, Max u={np.max(np.abs(u_curr)):.4f}")
+    
+    # Final conversion to primitive variables
+    rho_final, u_final, p_final = conservative_to_primitive(U, gamma)
+    
+    # Plot results
+    plt.figure(figsize=(12, 8))
+    
+    plt.subplot(3, 1, 1)
+    plt.plot(x[2:-2], rho_final[2:-2], 'b-', lw=1.5)
+    plt.ylabel('Density $\\rho$')
+    plt.title(f'Sod Shock Tube Solution at t={t_end:.2f}')
+    plt.grid(True)
+    
+    plt.subplot(3, 1, 2)
+    plt.plot(x[2:-2], u_final[2:-2], 'r-', lw=1.5)
+    plt.ylabel('Velocity $u$')
+    plt.grid(True)
+    
+    plt.subplot(3, 1, 3)
+    plt.plot(x[2:-2], p_final[2:-2], 'g-', lw=1.5)
+    plt.ylabel('Pressure $p$')
+    plt.xlabel('Position $x$')
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig('euler_solution.png')
+    plt.show()
+
+if __name__ == "__main__":
+    main()
+```
+****************************************

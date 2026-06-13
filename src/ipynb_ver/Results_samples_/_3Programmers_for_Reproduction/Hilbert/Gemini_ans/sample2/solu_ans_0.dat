@@ -1,0 +1,237 @@
+
+****************************************
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.linalg # Used only for comparison/verification in thought process, not in core solution.
+
+# Function to generate the Hilbert matrix H_n
+def generate_hilbert_matrix(n):
+    # H_n is an n x n matrix where h_ij = 1 / (i + j - 1)
+    # Using 0-indexed i, j in Python, this becomes 1 / (i + j + 1)
+    H = np.zeros((n, n), dtype=np.float64)
+    for i in range(n):
+        for j in range(n):
+            H[i, j] = 1.0 / (i + j + 1.0)
+    return H
+
+# Function to generate the vector b such that x_exact = (1, ..., 1)^T
+def generate_b_vector(H_n):
+    # b = H_n * x_exact, where x_exact is a vector of ones
+    n = H_n.shape[0]
+    x_exact = np.ones(n, dtype=np.float64)
+    b = H_n @ x_exact
+    return b, x_exact
+
+# --- LU Decomposition with Partial Pivoting ---
+def lu_decomposition_pivot(A):
+    # Performs LU decomposition with partial pivoting: P A = L U
+    n = A.shape[0]
+    # Create a copy of A to modify in-place for U and L (lower part)
+    A_copy = A.astype(np.float64)
+    # Initialize permutation matrix P
+    P = np.eye(n, dtype=np.float64)
+
+    for k in range(n):
+        # Find pivot row (row with maximum absolute value in current column k)
+        pivot_row = k + np.argmax(np.abs(A_copy[k:, k]))
+
+        # Swap rows in A_copy and P if pivot_row is not current row k
+        if pivot_row != k:
+            A_copy[[k, pivot_row]] = A_copy[[pivot_row, k]]
+            P[[k, pivot_row]] = P[[pivot_row, k]]
+
+        # Check for singular matrix (or numerically very small pivot)
+        if np.isclose(A_copy[k, k], 0.0):
+            raise ValueError(f"Matrix is singular or numerically singular at pivot {k}.")
+
+        # Perform Gaussian elimination for column k
+        for i in range(k + 1, n):
+            # Calculate multiplier
+            factor = A_copy[i, k] / A_copy[k, k]
+            # Store multiplier in the lower triangular part of A_copy
+            A_copy[i, k] = factor
+            # Update the rest of the row
+            A_copy[i, k+1:] -= factor * A_copy[k, k+1:]
+
+    # Extract L and U from the modified A_copy
+    L = np.eye(n, dtype=np.float64) + np.tril(A_copy, k=-1) # Lower triangular part with 1s on diagonal
+    U = np.triu(A_copy) # Upper triangular part
+
+    return P, L, U
+
+def forward_substitution(L, b):
+    # Solves Ly = b for y, where L is a lower triangular matrix
+    n = L.shape[0]
+    y = np.zeros(n, dtype=np.float64)
+    for i in range(n):
+        # y[i] = (b[i] - sum(L[i,j] * y[j] for j < i)) / L[i,i]
+        y[i] = (b[i] - np.dot(L[i, :i], y[:i])) / L[i, i]
+    return y
+
+def backward_substitution(U, y):
+    # Solves Ux = y for x, where U is an upper triangular matrix
+    n = U.shape[0]
+    x = np.zeros(n, dtype=np.float64)
+    for i in range(n - 1, -1, -1):
+        # x[i] = (y[i] - sum(U[i,j] * x[j] for j > i)) / U[i,i]
+        x[i] = (y[i] - np.dot(U[i, i+1:], x[i+1:])) / U[i, i]
+    return x
+
+def solve_lu(A, b):
+    # Solves Ax = b using LU decomposition with partial pivoting
+    P, L, U = lu_decomposition_pivot(A)
+    # Solve Ly = Pb
+    y = forward_substitution(L, P @ b)
+    # Solve Ux = y
+    x = backward_substitution(U, y)
+    return x
+
+# --- Cholesky Decomposition ---
+def cholesky_decomposition(A):
+    # Performs Cholesky decomposition: A = L L^T
+    n = A.shape[0]
+    L = np.zeros((n, n), dtype=np.float64)
+
+    for j in range(n):
+        # Calculate diagonal element L[j,j]
+        # L[j,j]^2 = A[j,j] - sum(L[j,k]^2 for k < j)
+        sum_sq_Ljk = np.sum(L[j, :j]**2)
+        val = A[j, j] - sum_sq_Ljk
+        # Check for positive definiteness (val should be non-negative)
+        if val < 0 and not np.isclose(val, 0.0):
+            raise ValueError(f"Matrix is not positive definite or numerically not at column {j}.")
+        L[j, j] = np.sqrt(max(0.0, val)) # Use max(0.0, val) to handle small negative due to float precision
+
+        # Calculate off-diagonal elements L[i,j] for i > j
+        # L[i,j] = (A[i,j] - sum(L[i,k] * L[j,k] for k < j)) / L[j,j]
+        for i in range(j + 1, n):
+            sum_prod_Lik_Ljk = np.dot(L[i, :j], L[j, :j])
+            if np.isclose(L[j, j], 0.0): # Handle division by zero if L[j,j] is zero
+                raise ValueError(f"Cholesky decomposition failed due to zero diagonal element at column {j}.")
+            L[i, j] = (A[i, j] - sum_prod_Lik_Ljk) / L[j, j]
+    return L
+
+def solve_cholesky(A, b):
+    # Solves Ax = b using Cholesky decomposition
+    L = cholesky_decomposition(A)
+    # Solve Ly = b
+    y = forward_substitution(L, b)
+    # Solve L^T x = y (backward substitution with L.T)
+    x = backward_substitution(L.T, y)
+    return x
+
+# --- Conjugate Gradient Method ---
+def conjugate_gradient(A, b, tol=1e-9, max_iter=20000):
+    # Solves Ax = b using the Conjugate Gradient method
+    n = A.shape[0]
+    x = np.zeros(n, dtype=np.float64) # Initial guess (can be any vector, zeros is common)
+    r = b - A @ x # Initial residual
+    p = r # Initial search direction
+    rs_old = np.dot(r, r) # r_k^T r_k
+
+    # If initial residual is already small, return x
+    if np.sqrt(rs_old) < tol:
+        return x
+
+    for i in range(max_iter):
+        Ap = A @ p # A p_k
+        pAp = np.dot(p, Ap)
+        if np.isclose(pAp, 0.0): # Avoid division by zero or very small numbers
+            # This can happen if p is orthogonal to A p, or A is singular
+            # For SPD A, pAp should be positive unless p is zero.
+            print(f"CG: p^T A p is zero or very small at iteration {i}. Stopping.")
+            break
+        alpha = rs_old / pAp # alpha_k = (r_k^T r_k) / (p_k^T A p_k)
+        x = x + alpha * p # x_{k+1} = x_k + alpha_k p_k
+        r = r - alpha * Ap # r_{k+1} = r_k - alpha_k A p_k
+        rs_new = np.dot(r, r) # r_{k+1}^T r_{k+1}
+
+        # Check for convergence
+        if np.sqrt(rs_new) < tol:
+            break
+
+        # Beta_k = (r_{k+1}^T r_{k+1}) / (r_k^T r_k)
+        if np.isclose(rs_old, 0.0): # Avoid division by zero
+            print(f"CG: rs_old is zero at iteration {i}. Stopping.")
+            break
+        beta = rs_new / rs_old
+        p = r + beta * p # p_{k+1} = r_{k+1} + beta_k p_k
+        rs_old = rs_new
+    else:
+        print(f"CG did not converge within {max_iter} iterations for n={n}. Final residual norm: {np.sqrt(rs_new):.2e}")
+    return x
+
+# --- Main execution and comparison ---
+if __name__ == "__main__":
+    ns = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+    
+    errors_lu = []
+    errors_cholesky = []
+    errors_cg = []
+
+    print("Solving H_n x = b for various n values...")
+    print("-" * 75)
+    print(f"{'n':<5} | {'LU Error (L_inf)':<20} | {'Cholesky Error (L_inf)':<20} | {'CG Error (L_inf)':<20}")
+    print("-" * 75)
+
+    for n in ns:
+        H_n = generate_hilbert_matrix(n)
+        b, x_exact = generate_b_vector(H_n)
+
+        # Solve using LU Decomposition
+        x_lu = np.array([]) # Initialize to empty array
+        error_lu = np.nan
+        try:
+            x_lu = solve_lu(H_n, b)
+            error_lu = np.max(np.abs(x_lu - x_exact))
+        except ValueError as e:
+            print(f"LU for n={n} failed: {e}")
+        errors_lu.append(error_lu)
+
+        # Solve using Cholesky Decomposition
+        x_cholesky = np.array([]) # Initialize to empty array
+        error_cholesky = np.nan
+        try:
+            x_cholesky = solve_cholesky(H_n, b)
+            error_cholesky = np.max(np.abs(x_cholesky - x_exact))
+        except ValueError as e:
+            print(f"Cholesky for n={n} failed: {e}")
+        errors_cholesky.append(error_cholesky)
+
+        # Solve using Conjugate Gradient
+        # CG tolerance needs to be carefully chosen for ill-conditioned systems.
+        # A very small tolerance might lead to non-convergence or very long runtimes.
+        # For Hilbert matrix, even with high max_iter, it might not reach machine epsilon.
+        # Let's set a reasonable tolerance and max_iter.
+        cg_tol = 1e-8 # Tolerance for residual norm
+        cg_max_iter = 50000 # Increased max iterations for ill-conditioned systems
+        x_cg = np.array([]) # Initialize to empty array
+        error_cg = np.nan
+        try:
+            x_cg = conjugate_gradient(H_n, b, tol=cg_tol, max_iter=cg_max_iter)
+            error_cg = np.max(np.abs(x_cg - x_exact))
+        except Exception as e: # Catch general exceptions for CG
+            print(f"CG for n={n} failed: {e}")
+        errors_cg.append(error_cg)
+
+        print(f"{n:<5} | {error_lu:<20.2e} | {error_cholesky:<20.2e} | {error_cg:<20.2e}")
+
+    print("-" * 75)
+
+    # Plotting the results
+    plt.figure(figsize=(12, 7))
+    plt.semilogy(ns, errors_lu, 'o-', label='LU Decomposition (from scratch)')
+    plt.semilogy(ns, errors_cholesky, 's-', label='Cholesky Decomposition (from scratch)')
+    plt.semilogy(ns, errors_cg, '^-', label=f'Conjugate Gradient (tol={cg_tol}, max_iter={cg_max_iter})')
+
+    plt.xlabel('Matrix Size (n)')
+    plt.ylabel('L-infinity Error (log scale)')
+    plt.title('L-infinity Error for Solving Hilbert System H_n x = b')
+    plt.legend()
+    plt.grid(True, which="both", ls="-")
+    plt.xticks(ns)
+    plt.tight_layout()
+    plt.show()
+```
+****************************************
