@@ -5,6 +5,8 @@ import operator
 from config import ALTERNATIVE_NUM, MAX_COMMENTS
 
 class State(TypedDict):
+    log_entries: Annotated[List[dict], operator.add]
+    
     # --- Problem ---
     prob_todo: str
 

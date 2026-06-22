@@ -151,19 +151,4 @@ plt.close()
 
 print("Figures saved successfully")
 ```
-
-**Key Improvements Explained:**
-
-1. **Upwind Scheme Implementation**:
-```python
-def upwind_derivative(u, dx):
-    du = np.zeros_like(u)
-    positive_u = u[1:-1] >= 0
-    du[1:-1] = np.where(
-        positive_u,
-        (u[1:-1] - u[:-2]) / dx,  # Backward difference
-        (u[2:] - u[1:-1]) / dx     # Forward difference
-    )
-    return du
-```
 ****************************************

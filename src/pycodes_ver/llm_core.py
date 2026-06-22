@@ -17,4 +17,4 @@ def llm_call_(config_dict, structured_module):
         temperature=0.0,
         )
 
-    return response_.choices[0].message.parsed
+    return response_

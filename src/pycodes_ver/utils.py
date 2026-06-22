@@ -26,30 +26,132 @@ def collapsible_mardown(title: str, content: str):
 
 
 # SAVE func
-def save_response_toMD(resp: dict, oput_file: str = f"./{WORKSPACE}/temp_rept.md"):
+def save_response_toMD(resp: dict, oput_file: str = "temp_final_report.md"):
+    
+    def find_latency(log_entries, step_names, iteration):
+        """辅助函数：从 log_entries 中精确匹配特定步骤和迭代轮次的耗时"""
+        if not log_entries:
+            return None
+        for entry in log_entries:
+            if entry and entry.get("step_name") in step_names and entry.get("iteration") == iteration:
+                return entry.get("latency_seconds")
+        return None
+
     try:
+        log_entries = resp.get("log_entries", [])
+        # 过滤并清洗 None 元素，确保后续迭代安全
+        log_entries = [entry for entry in log_entries if entry is not None]
+        
         with open(oput_file, "w", encoding="utf-8") as f:
             f.write(f"### 🛌🏻 Re4gent with Multi-Modal Review\n\n")
             f.write(f"#### Configs 🏷️:\nMaxCount: {MAX_ITERATIONS}, MultiModalReview: {MULTI_MODAL_REVIEW}, AlternativeNum: {ALTERNATIVE_NUM}, MaxComments: {MAX_COMMENTS}, ConsModule_ON: {ConsModule_ON}, CUT_OUTEXT: {CUT_OUTEXT}\n\n")
+            
+            # 1. 顶部性能与预算开销汇总
+            total_latency = sum(entry.get("latency_seconds", 0.0) for entry in log_entries)
+            total_input_tokens = 0
+            total_output_tokens = 0
+            
+            for entry in log_entries:
+                tokens = entry.get("token_usage")
+                if isinstance(tokens, dict):
+                    total_input_tokens += tokens.get("prompt_tokens", tokens.get("input_tokens", 0))
+                    total_output_tokens += tokens.get("completion_tokens", tokens.get("output_tokens", 0))
+            
+            # 估算 API 资金成本（按照 mini 模型标准资费：输入 $0.15/1M tokens, 输出 $0.60/1M tokens）
+            estimated_cost = (total_input_tokens * 0.15 + total_output_tokens * 0.60) / 1000000
+            
+            f.write(f"### ⏱️ Performance & Cost Summary\n")
+            f.write(f"- **Total Pipeline Latency:** {total_latency:.2f} seconds\n")
+            f.write(f"- **Total Input Tokens:** {total_input_tokens}\n")
+            f.write(f"- **Total Output Tokens:** {total_output_tokens}\n")
+            f.write(f"- **Estimated API Cost:** ${estimated_cost:.6f} USD *(Calculated at standard mini model rates)*\n\n")
+            
+            # 2. 依次输出主要解决步骤的内容，并高亮区分精确解耦后的耗时
             for key, value in resp.items():
+                if key == "log_entries":
+                    continue 
+                
                 f.write(f"### {key}\n")
-                if isinstance(value,list):
-                    for i,item in enumerate(value):
-                        if key == "python_codes":
-                            f.write(f"\n#### Script block{i+1}:\n")
-                            f.write(f"\n{item}\n\n")
-
+                
+                if isinstance(value, list):
+                    for i, item in enumerate(value):
+                        latency_str = ""
+                        
+                        # ----------------- 耗时精确对齐区 -----------------
+                        if key in ["python_codes", "technical_spec"]:
+                            step_names = ["Programmer Draft", "Programmer Revision"]
+                            lat = find_latency(log_entries, step_names, i)
+                            if lat is not None:
+                                latency_str = f"*(LLM Code Gen Time: {lat:.2f}s)*"
+                                
                         elif key == "runtime_outputs":
-                            f.write(f"\n#### Output block{i+1}\n")
+                            step_names = ["Executor"]
+                            lat = find_latency(log_entries, step_names, i)
+                            if lat is not None:
+                                latency_str = f"*(Code Execution Time: {lat:.2f}s)*"
+                                
+                        elif key == "rev_image_description":
+                            step_names = ["IMAGE Review"]
+                            lat = find_latency(log_entries, step_names, i)
+                            if lat is not None:
+                                latency_str = f"*(Image Review Time: {lat:.2f}s)*"
+                                
+                        elif key == "review_comments":
+                            step_names = ["Reviewer"]
+                            lat = find_latency(log_entries, step_names, i + 1)
+                            if lat is not None:
+                                latency_str = f"*(LLM Review Time: {lat:.2f}s)*"
+                                
+                        elif key == "solution_plans":
+                            step_names = ["Consultant"]
+                            lat = find_latency(log_entries, step_names, 0)
+                            if lat is not None:
+                                latency_str = f"*(LLM Consulting Time: {lat:.2f}s)*"
+                        # --------------------------------------------------
+
+                        # 格式化写入 Markdown
+                        if key == "python_codes":
+                            f.write(f"\n#### Script block {i+1} {latency_str}:\n")
+                            f.write(f"\n{item}\n\n")
+                        elif key == "runtime_outputs":
+                            f.write(f"\n#### Output block {i+1} {latency_str}:\n")
                             f.write(f"\n{item}\n\n")
                         else:
-                            f.write(f"\tCurrent Stage [{chr(i+96+1).upper()}/{len(value)}]\n{item}\n\n")
+                            f.write(f"\tCurrent Stage [{chr(i+96+1).upper()}/{len(value)}] {latency_str}\n{item}\n\n")
                     f.write("\n\n")
                 else:
-                    f.write(f"{str(value)}\n\n")
+                    # 单一值（如 expanded_prob）
+                    lat_val = ""
+                    if key == "expanded_prob" and ConsModule_ON:
+                        lat = find_latency(log_entries, ["Consultant"], 0)
+                        if lat is not None:
+                            lat_val = f" *(LLM Consulting Time: {lat:.2f}s)*"
+                    f.write(f"{lat_val}\n{str(value)}\n\n")
+            
+            # 3. 输出运行分析明细表格
+            f.write(f"### 📊 Detailed Execution Logs & Cost Analysis (log_entries)\n\n")
+            f.write(f"| Step Name | Iteration | Latency (s) | Input Tokens | Output Tokens | Total Tokens | Estimated Cost (USD) |\n")
+            f.write(f"| :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+            
+            for entry in log_entries:
+                name = entry.get("step_name", "N/A")
+                it = entry.get("iteration", 0)
+                lat = entry.get("latency_seconds", 0.0)
+                
+                tokens = entry.get("token_usage") or {}
+                in_t = tokens.get("prompt_tokens", 0)
+                out_t = tokens.get("completion_tokens", 0)
+                tot_t = tokens.get("total_tokens", in_t + out_t)
+                
+                cost = (in_t * 0.15 + out_t * 0.60) / 1000000
+                
+                f.write(f"| {name} | {it} | {lat:.2f}s | {in_t} | {out_t} | {tot_t} | ${cost:.6f} |\n")
+            f.write("\n\n")
+            
         print(f"✅ 保存成功: {oput_file}")
     except Exception as e:
         print(f"❌ {oput_file}保存失败: {e}")
+        traceback.print_exc()
 
 
 # text truncate func
@@ -72,6 +174,7 @@ def truncate_outext(text: str, max_chars: int = 800) -> str:
         + f"\n\n... [Truncated: Content too long ({len(text)} chars). Hidden middle part.] ...\n\n" 
         + text[-tail_len:]
     )
+
 
 def execute_code_tool(code_input: str) -> str:
     """

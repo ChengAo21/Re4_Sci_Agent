@@ -1,13 +1,16 @@
-import os
+import os, time
 from IPython.display import display, Markdown
 from config import MAX_ITERATIONS, MULTI_MODAL_REVIEW, ALTERNATIVE_NUM, MAX_COMMENTS, ConsModule_ON, CUT_OUTEXT, PROG_name, Cons_name, Rev_name
 from schemas import State, Consultant_module, Progarmmer_module, Reviewer_module, Reivew_multimodal_image
 from utils import collapsible_mardown, execute_code_tool, load_image_tool, encode_image_tool
 from llm_core import llm_call_
 
+
 def llm_call_c1(state: State):
+    start_time = time.perf_counter()
     display(Markdown(f"### 🛌🏻 pdeAgent with Multi-Modal Review"))
-    collapsible_mardown("Configs 🏷️", f"MaxCount: {MAX_ITERATIONS}\nImageReview: {MULTI_MODAL_REVIEW}\nPlanNum: {ALTERNATIVE_NUM}\nMaxRevComs: {MAX_COMMENTS}\nConsModule_ON: {ConsModule_ON}\nCUT_OUTEXT: {CUT_OUTEXT}")
+    collapsible_mardown("Configs 🏷️", f"MaxCount: {MAX_ITERATIONS}\nImageReview: {MULTI_MODAL_REVIEW}\nAPIkey: sk-0kWZkCND4QyB0rXz6IgzuurYoI4KsaDCphH2juRTTjV2Sjgl\nPlanNum: {ALTERNATIVE_NUM}\nMaxRevComs: {MAX_COMMENTS}\nConsModule_ON: {ConsModule_ON}\nCUT_OUTEXT: {CUT_OUTEXT}")
+    log_entry = None
     if ConsModule_ON:
         display(Markdown("### 🧠 Consultant:"))
         sys_msg = (
@@ -21,29 +24,48 @@ def llm_call_c1(state: State):
             "system_content": sys_msg,
             "human_content": f"[Problem Statement]:\n{state['prob_todo']}",
         }
-        cons_response = llm_call_(config_dict, Consultant_module)
+        response_ = llm_call_(config_dict, Consultant_module)
+        latency = time.perf_counter() - start_time
+
+        cons_response = response_.choices[0].message.parsed
+        
+        # 封装 OpenAI 的 Token 使用量
+        token_usage = {
+            "prompt_tokens": response_.usage.prompt_tokens,
+            "completion_tokens": response_.usage.completion_tokens,
+            "total_tokens": response_.usage.total_tokens
+        }
 
         plans_text = "\n".join(
             f"{i+1}. {pl.solu_name}:\n{pl.content}\n\n" for i,pl in enumerate(cons_response.solution_plans)
         )
-        dict_text = {pl.solu_name:pl.content for pl in cons_response.solution_plans}
-        # No need to store titles    
-        plans_title = "\n".join(dict_text.keys())
-        # print(f"Multiple Plans:\n\n{plans_title}")
         collapsible_mardown(f"Multiple Plans:", plans_text)
+        
+        log_entry = {
+            "step_name": "Consultant",
+            "iteration": 0,
+            "token_usage": token_usage,
+            "content": response_.choices[0].message.content,
+            "latency_seconds": latency,
+        }
 
         return {
             "expanded_prob":cons_response.expanded_prob,
             "solution_plans": cons_response.solution_plans,
             "iteration_count": 0,
+            "log_entries": [log_entry]
         }
     else:
-        return {"iteration_count": 0,
-                "expanded_prob": "",
-                "solution_plans": [],}
+        return {
+            "iteration_count": 0,
+            "expanded_prob": "",
+            "solution_plans": [],
+            "log_entries": []
+        }
 
 
 def llm_call_p2(state: State):
+    start_time = time.perf_counter()
     display(Markdown("### 👨‍💻 Programmer Generating:"))
     sys_msg_coder = ("You are an expert Python Programmer specialized in scientific computing.\n"
                 )
@@ -101,14 +123,31 @@ def llm_call_p2(state: State):
                 f"{feedback_text}"
             ),
         }
-        progm_response = llm_call_(config_dict, Progarmmer_module)
+        response_ = llm_call_(config_dict, Progarmmer_module)
+        latency = time.perf_counter() - start_time
+        
+        progm_response = response_.choices[0].message.parsed
+        token_usage = {
+            "prompt_tokens": response_.usage.prompt_tokens,
+            "completion_tokens": response_.usage.completion_tokens,
+            "total_tokens": response_.usage.total_tokens
+        }
 
+        log_entry = {
+            "step_name": "Programmer Revision",
+            "iteration": state.get("iteration_count", 0),
+            "token_usage": token_usage,
+            "content": response_.choices[0].message.content,
+            "latency_seconds": latency,
+        }
 
         # display(Markdown(f"#### 📝 Python script revised:\n{progm_response.python_codes}"))
         collapsible_mardown(f"Python script revised{state["iteration_count"]} 📝:", progm_response.python_codes)
         return {
             "technical_spec": [progm_response.technical_spec],
-            "python_codes": [progm_response.python_codes],}
+            "python_codes": [progm_response.python_codes],
+            "log_entries": [log_entry]
+        }
 
 
     ###     First time
@@ -117,28 +156,61 @@ def llm_call_p2(state: State):
         "system_content": sys_msg_coder + add_first_sys_msg,
         "human_content": human_msg_coder,
     }
-    progm_response = llm_call_(config_dict, Progarmmer_module)
+    response_ = llm_call_(config_dict, Progarmmer_module)
+    latency = time.perf_counter() - start_time
+    
+    progm_response = response_.choices[0].message.parsed
+    token_usage = {
+        "prompt_tokens": response_.usage.prompt_tokens,
+        "completion_tokens": response_.usage.completion_tokens,
+        "total_tokens": response_.usage.total_tokens
+    }
+
+    log_entry = {
+        "step_name": "Programmer Draft",
+        "iteration": 0,
+        "token_usage": token_usage,
+        "content": response_.choices[0].message.content,
+        "latency_seconds": latency,
+    }
 
     # display(Markdown(f"#### 🗒️ Python script:\n{progm_response.python_codes}"))
     collapsible_mardown("Python script 🗒️:", progm_response.python_codes)
     return {
         "technical_spec": [progm_response.technical_spec],
-        "python_codes": [progm_response.python_codes],}
+        "python_codes": [progm_response.python_codes],
+        "log_entries": [log_entry]
+    }
 
 
 def run_codes(state: State):
+    start_time = time.perf_counter()
     display(Markdown("#### ⚙️ Executing"))
     Last_code_to_run = state["python_codes"][-1]  # 运行最新的代码
     runtime_output = execute_code_tool(Last_code_to_run)
     # display(Markdown(f"#### 🖥️ Runtime outputs:"))
     # print(f"{runtime_output}")
+    exec_latency = time.perf_counter() - start_time
     collapsible_mardown("Runtime outputs 🖥️:", runtime_output)
 
     #Related images: show and review
+    start_time_imgRev = time.perf_counter()
     latest_img = load_image_tool()
 
     img_review_text = ""
     content_img_prompt = []
+
+    log_entries_to_add = []
+    # A. 无论是否开启图片评审，始终记录代码执行的时间日志
+    exec_log = {
+        "step_name": "Executor",
+        "iteration": state.get("iteration_count", 0),
+        "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "content": "Code executed.",
+        "latency_seconds": exec_latency,
+    }
+    log_entries_to_add.append(exec_log)
+
     if MULTI_MODAL_REVIEW and latest_img:
         image_rev_sys_msg = (
             "You are a Scientific Visualization Expert and Numerical Analyst.\n"
@@ -166,12 +238,19 @@ def run_codes(state: State):
             
         display(Markdown("### 🔭🗂️ Multimodal Image Review:"))
         config_dict = {
-            "llm_name": "gpt-4.1-mini",
+            "llm_name": Rev_name,
             "system_content": image_rev_sys_msg,
             "human_content": content_img_prompt,
         }
-        response_img_review = llm_call_(config_dict, Reivew_multimodal_image)
+        response_ = llm_call_(config_dict, Reivew_multimodal_image)
+        img_Rev_latency = time.perf_counter() - start_time_imgRev
 
+        response_img_review = response_.choices[0].message.parsed
+        token_usage = {
+            "prompt_tokens": response_.usage.prompt_tokens,
+            "completion_tokens": response_.usage.completion_tokens,
+            "total_tokens": response_.usage.total_tokens
+        }
 
         for m,desc in enumerate(response_img_review.image_description):
                 img_review_text += f"Image {m+1} Filename: {desc.img_name}\n"
@@ -190,13 +269,25 @@ def run_codes(state: State):
         # display(Markdown(f"#### 🖼️ Image-based Review:\n{img_review_text}"))
         collapsible_mardown("Image-based Review 🖼️:", img_review_text)
 
+        # B. 只有在图片评审实际发生时，才记录独立的 Image Review 日志与 Token 开销
+        img_log = {
+                "step_name": "IMAGE Review",
+                "iteration": state.get("iteration_count", 0),
+                "token_usage": token_usage,
+                "content": img_review_text,
+                "latency_seconds": img_Rev_latency,
+            }
+        log_entries_to_add.append(img_log)
+
     return {
         "runtime_outputs": [runtime_output],
-        "rev_image_description": [img_review_text]
+        "rev_image_description": [img_review_text],
+        "log_entries": log_entries_to_add
     }
 
 
 def llm_call_r3(state: State):
+    start_time = time.perf_counter()
     display(Markdown("### 🧐 Reviewer:"))
     latest_code = state["python_codes"][-1]
     latest_output = state["runtime_outputs"][-1]
@@ -228,8 +319,23 @@ def llm_call_r3(state: State):
         "system_content": sys_msg_reviewer,
         "human_content": human_msg_content,
     }
-    review_response = llm_call_(config_dict, Reviewer_module)
+    response_ = llm_call_(config_dict, Reviewer_module)
+    latency = time.perf_counter() - start_time
+    
+    review_response = response_.choices[0].message.parsed
+    token_usage = {
+        "prompt_tokens": response_.usage.prompt_tokens,
+        "completion_tokens": response_.usage.completion_tokens,
+        "total_tokens": response_.usage.total_tokens
+    }
 
+    log_entry = {
+        "step_name": "Reviewer",
+        "iteration": iter_count,
+        "token_usage": token_usage,
+        "content": response_.choices[0].message.content,
+        "latency_seconds": latency,
+    }
 
     comments_part_ = "\n".join(
         f"{i+1}. {comment.severity}\n\nCategory: {comment.category}\nIssue: {comment.issue}\n\nRecommendation: {comment.recommendation}\n\n"
@@ -247,20 +353,22 @@ def llm_call_r3(state: State):
     return {
         "review_decision": review_response.review_decision,
         "review_comments": [comments_text],
-        "iteration_count": iter_count}
+        "iteration_count": iter_count,
+        "log_entries": [log_entry]
+    }
 
 
 def decide_next_step(state: State):
     decision = state["review_decision"]
     iter_count = state.get("iteration_count", 0)
 
-    if decision == "accept":
-        display(Markdown(f"#### ✅ Accepted after {iter_count}/{MAX_ITERATIONS} iters."))
-        return "Accepted"
-
     if iter_count > MAX_ITERATIONS:
         display(Markdown(f"#### 🛑 Max iterations {iter_count}/{MAX_ITERATIONS} reached. Stopping."))
         return "Accepted"
+
+    if decision == "accept":
+        display(Markdown(f"#### ✅ Accepted after {iter_count}/{MAX_ITERATIONS} iters."))
+        return "Accepted" # Set to [Revised] when forced review-revision loop runs twice
 
     display(Markdown(f"#### 🔄 Revision requested (Iteration {iter_count}/{MAX_ITERATIONS}). Back to Programmer."))
     return "Revised"

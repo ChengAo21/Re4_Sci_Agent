@@ -266,17 +266,38 @@ Print necessary solving information to facilitate the reliability check of the s
 
 
 Keyhole_problem = r"""
-Please read the CSV data file from path: ./dataset_keyhole.csv and consider the data in columns 3, 4, 5, 6, 7, 8 and 11.
-These columns correspond to seven physical quantities respectively:
-the effective laser power (eta P), the laser scan speed (V_s), the laser beam radius (r_0), the thermal diffusivity (alpha), the material density (rho), the heat capacity (C_p), and the difference between melting and ambient temperatures (T_l-T_0).
+Perform dimensional analysis for laser-melted liquid metal to derive the dimensionless form of the keyhole aspect ratio (denoted as 'e*').
 
-Based on dimensional analysis and using the data of these physical quantities in the file, please identify the optimal dimensionless quantity formed by combining these parameters, which exhibits the highest coefficient of determination (R-squared) and thus dominates the variation in the keyhole aspect ratio e*.
+Please read the CSV data file from path: ./dataset_keyhole.csv to perform a data-driven dimensional analysis.
+The seven physical quantities for the analysis are in the columns named: 
+the effective laser power ('etaP'), the laser scan speed ('Vs'), the laser beam radius ('r0'), the thermal diffusivity ('alpha'), the material density ('rho'), the heat capacity ('cp'), and the difference between melting and ambient temperatures ('Tl-T0').
+
+The target variable for fitting is the keyhole aspect ratio (e*).
+Based on dimensional analysis and using the data in the file, identify the optimal dimensionless quantity formed by combining these parameters, which exhibits the highest coefficient of determination (R-squared) for predicting keyhole aspect ratio.
 
 Implement a roubust and reliable method from scratch for this data-driven dimensional analysis. 
 Ensure that the the resulting dimensionless exponents are normalized by V_s and that the exponents of physical quantities be integers or rational fractions with absolute values not exceeding 3.
 
 [HINTS]:
 Plot one figure with linear scale for both axes to visualize the correlation between the optimal dimensionless quantity and e*.
-Just save figs do not use plt.show() in the code.
-To read the data file, just use df = pd.read_csv(file_path) without any additional parameters.
+Print the dinmensional Matrix. Just save figs do not use plt.show() in the code.
+"""
+
+
+Rayleigh_Benard_problem = r"""
+Perform dimensional analysis for Rayleigh-Bénard convection in a planar horizontal layer of fluid heated from below, to derive the dimensionless form of the Nusselt number (denoted as 'Nu').
+
+Please read the CSV data file from path: ./dataset_rayben.csv to perform a data-driven dimensional analysis.
+The seven physical quantities for the analysis are in the columns named:
+the height of the container ('h'), the thermal conductivity ('lambda'), the temperature difference between the top and bottom surfaces ('delta_T'), the gravitational acceleration ('g'), the thermal expansion coefficient ('alpha'), the kinematic viscosity ('nu'), and the thermal diffusivity ('kappa').
+
+The target variable for fitting is the Nusselt number (Nu).
+Based on dimensional analysis and using the data in the file, identify the optimal dimensionless quantity formed by combining these parameters, which exhibits the highest coefficient of determination (R-squared) for predicting Nu.
+
+Implement a roubust and reliable method from scratch for this data-driven dimensional analysis. 
+Ensure that the the resulting dimensionless exponents are normalized by 'alpha' and that the exponents of physical quantities be integers or rational fractions with absolute values not exceeding 3.
+
+[HINTS]:
+Plot one figure with linear scale for both axes to visualize the correlation between the optimal dimensionless quantity and Nu.
+Print the dinmensional Matrix. Just save figs do not use plt.show() in the code.
 """
