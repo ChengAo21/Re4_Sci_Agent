@@ -1,0 +1,257 @@
+
+****************************************
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from fractions import Fraction
+from itertools import product
+from numpy.linalg import svd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+
+# Fundamental dimensions: M (mass), L (length), T (time), Theta (temperature)
+# Dimensional exponents for each physical quantity:
+# h (height): L
+# lambda (thermal conductivity): M L T^-3 Theta^-1
+# delta_T (temperature difference): Theta
+# g (gravity): L T^-2
+# alpha (thermal expansion coefficient): Theta^-1
+# nu (kinematic viscosity): L^2 T^-1
+# kappa (thermal diffusivity): L^2 T^-1
+
+# Map physical quantities to their dimensional exponents in order [M, L, T, Theta]
+DIMENSIONS = {
+    'h':       np.array([0, 1, 0, 0]),
+    'lambda':  np.array([1, 1, -3, -1]),
+    'delta_T': np.array([0, 0, 0, 1]),
+    'g':       np.array([0, 1, -2, 0]),
+    'alpha':   np.array([0, 0, 0, -1]),
+    'nu':      np.array([0, 2, -1, 0]),
+    'kappa':   np.array([0, 2, -1, 0])
+}
+
+PHYS_VARS = ['h', 'lambda', 'delta_T', 'g', 'alpha', 'nu', 'kappa']
+
+# Load data
+
+def load_data(filepath):
+    df = pd.read_csv(filepath)
+    X = df[PHYS_VARS].values
+    Nu = df['Nu'].values
+    return X, Nu
+
+# Construct dimensional matrix (4 x 7)
+# Rows: M, L, T, Theta
+# Columns: physical quantities in PHYS_VARS order
+
+def construct_dimensional_matrix():
+    D = np.zeros((4, len(PHYS_VARS)))
+    for j, var in enumerate(PHYS_VARS):
+        D[:, j] = DIMENSIONS[var]
+    return D
+
+# Compute null space of dimensional matrix
+# Using SVD, null space corresponds to singular values close to zero
+
+def null_space(A, atol=1e-13, rtol=0):
+    u, s, vh = svd(A)
+    tol = max(atol, rtol * s[0])
+    nnz = (s >= tol).sum()
+    ns = vh[nnz:].conj().T
+    return ns
+
+# Rational approximation of vector elements with denominator <= max_denominator
+# and numerator and denominator absolute values <= max_abs
+
+def rational_approximation(vec, max_denominator=3, max_abs=3):
+    approx = []
+    for x in vec:
+        best_frac = None
+        best_err = float('inf')
+        for denom in range(1, max_denominator+1):
+            num = round(x * denom)
+            if abs(num) > max_abs or denom > max_abs:
+                continue
+            frac = Fraction(num, denom)
+            err = abs(float(frac) - x)
+            if err < best_err:
+                best_err = err
+                best_frac = frac
+        if best_frac is None:
+            best_frac = Fraction(0,1)
+        approx.append(best_frac)
+    return approx
+
+# Normalize exponents by alpha's exponent
+# alpha is at index 4 in PHYS_VARS
+
+def normalize_by_alpha(exponents):
+    alpha_exp = exponents[4]
+    if alpha_exp == 0:
+        return exponents  # Avoid division by zero
+    return [e / alpha_exp for e in exponents]
+
+# Generate candidate exponent vectors from null space basis vectors
+# by searching integer linear combinations with coefficients in [-3,3]
+# and absolute values <= 3 after normalization
+
+def generate_candidates(null_basis, max_abs=3):
+    candidates = []
+    k = null_basis.shape[1]
+    coeff_ranges = [range(-max_abs, max_abs+1)] * k
+    for coeffs in product(*coeff_ranges):
+        if all(c == 0 for c in coeffs):
+            continue
+        vec = np.zeros(null_basis.shape[0])
+        for i, c in enumerate(coeffs):
+            vec += c * null_basis[:, i]
+        norm_vec = normalize_by_alpha(vec)
+        rat_vec = rational_approximation(norm_vec, max_denominator=max_abs, max_abs=max_abs)
+        rat_vec_float = np.array([float(f) for f in rat_vec])
+        # Ensure alpha exponent is not zero and all exponents within bounds
+        if rat_vec[4] != 0 and np.all(np.abs(rat_vec_float) <= max_abs):
+            alpha_exp = rat_vec_float[4]
+            norm_rat_vec = [float(f)/alpha_exp for f in rat_vec]
+            norm_rat_vec = [round(x, 3) for x in norm_rat_vec]
+            candidates.append(norm_rat_vec)
+    # Remove duplicates
+    unique_candidates = []
+    seen = set()
+    for c in candidates:
+        t = tuple(c)
+        if t not in seen:
+            seen.add(t)
+            unique_candidates.append(c)
+    return unique_candidates
+
+# Compute dimensionless quantity from data and exponents
+# dimensionless quantity = product of each variable^exponent
+
+def compute_dimensionless_quantity(X, exponents):
+    X = np.array(X)
+    exponents = np.array(exponents)
+    with np.errstate(divide='ignore'):
+        logX = np.log(X)
+    logX[np.isneginf(logX)] = -1e10
+    log_dimless = np.dot(logX, exponents)
+    dimless = np.exp(log_dimless)
+    return dimless
+
+# Perform linear regression of Nu on dimensionless quantity in log-log space
+# Return R-squared, slope, intercept
+
+def regression_r2(Nu, dimless):
+    mask = (Nu > 0) & (dimless > 0)
+    if np.sum(mask) < 2:
+        return -np.inf, None, None
+    log_Nu = np.log(Nu[mask]).reshape(-1,1)
+    log_dimless = np.log(dimless[mask]).reshape(-1,1)
+    model = LinearRegression().fit(log_dimless, log_Nu)
+    pred = model.predict(log_dimless)
+    r2 = r2_score(log_Nu, pred)
+    return r2, model.coef_[0][0], model.intercept_[0]
+
+# Plot and save figures
+
+def plot_dimensional_matrix(D, filename):
+    fig, ax = plt.subplots(figsize=(8,4))
+    cax = ax.matshow(D, cmap='coolwarm')
+    ax.set_xticks(range(len(PHYS_VARS)))
+    ax.set_xticklabels(PHYS_VARS, rotation=45)
+    ax.set_yticks(range(4))
+    ax.set_yticklabels(['M', 'L', 'T', 'Theta'])
+    ax.set_title('Dimensional Matrix')
+    fig.colorbar(cax, ax=ax)
+    fig.tight_layout()
+    fig.savefig(filename)
+    plt.close(fig)
+
+
+def plot_regression(log_dimless, log_Nu, model, filename):
+    fig, ax = plt.subplots(figsize=(6,6))
+    ax.scatter(log_dimless, log_Nu, label='Data', color='blue')
+    ax.plot(log_dimless, model.predict(log_dimless), color='red', label='Fit')
+    ax.set_xlabel('log(Dimensionless Quantity)')
+    ax.set_ylabel('log(Nu)')
+    ax.set_title('Regression of log(Nu) vs log(Dimensionless Quantity)')
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(filename)
+    plt.close(fig)
+
+# Plot summary of candidates and their R2 values
+
+def plot_candidates_summary(candidates, r2_values, filename):
+    fig, ax = plt.subplots(figsize=(10,6))
+    indices = np.arange(len(candidates))
+    ax.bar(indices, r2_values, color='skyblue')
+    ax.set_xlabel('Candidate Index')
+    ax.set_ylabel('R-squared')
+    ax.set_title('R-squared of Candidate Dimensionless Groups')
+    ax.set_ylim(0,1.05)
+    fig.tight_layout()
+    fig.savefig(filename)
+    plt.close(fig)
+
+
+def main():
+    X, Nu = load_data('./dataset_rayben.csv')
+
+    D = construct_dimensional_matrix()
+    print("Dimensional Matrix (rows: M,L,T,Theta; cols: h,lambda,delta_T,g,alpha,nu,kappa):")
+    print(D)
+
+    plot_dimensional_matrix(D, 'dimensional_matrix.png')
+
+    ns = null_space(D)
+    if ns.size == 0:
+        print("No dimensionless groups found (null space empty).")
+        return
+
+    candidates = generate_candidates(ns, max_abs=3)
+    print(f"Generated {len(candidates)} candidate dimensionless groups.")
+
+    r2_list = []
+    for exps in candidates:
+        dimless = compute_dimensionless_quantity(X, exps)
+        r2, _, _ = regression_r2(Nu, dimless)
+        r2_list.append(r2)
+
+    plot_candidates_summary(candidates, r2_list, 'candidates_r2_summary.png')
+
+    best_r2 = -np.inf
+    best_candidate = None
+    best_model = None
+    best_log_dimless = None
+    best_log_Nu = None
+
+    for exps, r2 in zip(candidates, r2_list):
+        if r2 > best_r2:
+            best_r2 = r2
+            best_candidate = exps
+
+    if best_r2 < 0.95:
+        print("No candidate dimensionless group found with R2 > 0.95.")
+        print(f"Best candidate R2 = {best_r2:.5f}. Consider relaxing constraints or further analysis.")
+    else:
+        dimless = compute_dimensionless_quantity(X, best_candidate)
+        mask = (Nu > 0) & (dimless > 0)
+        log_Nu = np.log(Nu[mask]).reshape(-1,1)
+        log_dimless = np.log(dimless[mask]).reshape(-1,1)
+        best_model = LinearRegression().fit(log_dimless, log_Nu)
+        best_log_dimless = log_dimless
+        best_log_Nu = log_Nu
+
+        print("Best dimensionless group exponents normalized by alpha:")
+        for var, exp in zip(PHYS_VARS, best_candidate):
+            frac = Fraction(exp).limit_denominator(3)
+            print(f"{var}: {frac} ({float(frac):.3f})")
+        print(f"Best R-squared: {best_r2:.5f}")
+
+        plot_regression(best_log_dimless, best_log_Nu, best_model, 'regression_best_candidate.png')
+
+if __name__ == '__main__':
+    main()
+```
+****************************************

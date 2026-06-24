@@ -1,0 +1,236 @@
+
+****************************************
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from numpy.linalg import svd
+from fractions import Fraction
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+import itertools
+import logging
+import os
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+# Fundamental dimensions: M (mass), L (length), T (time), Theta (temperature)
+# Dimensional exponents for each physical quantity:
+# h (height): L^1
+# lambda (thermal conductivity): M L T^-3 Theta^-1
+# delta_T (temperature difference): Theta^1
+# g (gravity): L T^-2
+# alpha (thermal expansion coefficient): Theta^-1
+# nu (kinematic viscosity): L^2 T^-1
+# kappa (thermal diffusivity): L^2 T^-1
+
+# Order of quantities: [h, lambda, delta_T, g, alpha, nu, kappa]
+# Dimensions matrix rows: M, L, T, Theta
+
+def construct_dimensional_matrix():
+    # Correct dimensional matrix with accurate exponents
+    D = np.array([
+        [0, 1, 0, 0, 0, 0, 0],    # M
+        [1, 1, 0, 1, 0, 2, 2],    # L
+        [0,-3, 0,-2, 0,-1,-1],    # T
+        [0,-1, 1, 0,-1, 0, 0]     # Theta
+    ], dtype=float)
+    return D
+
+
+def null_space(A, atol=1e-13, rtol=0):
+    # Compute the null space of A using SVD
+    u, s, vh = svd(A)
+    tol = max(atol, rtol * s[0])
+    nnz = (s >= tol).sum()
+    ns = vh[nnz:].conj().T
+    return ns
+
+
+def rational_approximation(x, max_denominator=12):
+    # Approximate float x by a fraction with denominator <= max_denominator
+    frac = Fraction(x).limit_denominator(max_denominator)
+    return frac.numerator, frac.denominator
+
+
+def normalize_by_alpha(exponents, alpha_index=4):
+    # Normalize all exponents by the exponent of alpha if nonzero
+    alpha_exp = exponents[alpha_index]
+    if alpha_exp == 0:
+        return None  # Cannot normalize if alpha exponent is zero
+    return exponents / alpha_exp
+
+
+def generate_candidate_exponents(null_basis, max_abs=3, max_denominator=6, max_sum_abs=6):
+    # null_basis: each column is a basis vector for dimensionless groups
+    # Generate integer combinations of basis vectors with coefficients in [-max_abs, max_abs]
+    # sum of absolute coefficients <= max_sum_abs to limit search
+
+    n_basis = null_basis.shape[1]
+    coeff_range = range(-max_abs, max_abs+1)
+
+    candidates = set()
+
+    # Generate all coefficient tuples with length n_basis
+    for coeffs in itertools.product(coeff_range, repeat=n_basis):
+        if all(c == 0 for c in coeffs):
+            continue
+        if sum(abs(c) for c in coeffs) > max_sum_abs:
+            continue
+        exps = null_basis @ np.array(coeffs)
+        rat_exps = []
+        valid = True
+        for val in exps:
+            num, den = rational_approximation(val, max_denominator)
+            val_approx = num / den
+            if abs(val_approx) > max_abs:
+                valid = False
+                break
+            rat_exps.append(Fraction(num, den))
+        if not valid:
+            continue
+
+        # Enforce normalization by alpha exponent strictly
+        alpha_exp = rat_exps[4]
+        if alpha_exp == 0:
+            # Skip candidates with zero alpha exponent to ensure interpretability
+            continue
+
+        norm_exps = [r / alpha_exp for r in rat_exps]
+        # Check all normalized exps abs <= max_abs
+        if any(abs(float(e)) > max_abs for e in norm_exps):
+            continue
+
+        # Store as tuple of Fractions to avoid duplicates
+        norm_exps_tuple = tuple(norm_exps)
+        candidates.add(norm_exps_tuple)
+
+    return list(candidates)
+
+
+def compute_dimensionless_group(data, exponents):
+    # data: DataFrame with columns in order: h, lambda, delta_T, g, alpha, nu, kappa
+    # exponents: list or tuple of 7 rational exponents
+    vals = np.ones(len(data))
+    cols = ['h', 'lambda', 'delta_T', 'g', 'alpha', 'nu', 'kappa']
+    for col, exp in zip(cols, exponents):
+        vals *= data[col] ** float(exp)
+    return vals
+
+
+def fit_and_score(x, y):
+    # Convert inputs to numpy arrays to avoid attribute errors
+    x = np.array(x)
+    y = np.array(y)
+    # Fit linear regression to log-log data: log(y) = a + b*log(x)
+    # Return R2 score
+    log_x = np.log(x).reshape(-1,1)
+    log_y = np.log(y)
+    model = LinearRegression().fit(log_x, log_y)
+    y_pred = np.exp(model.predict(log_x))
+    r2 = r2_score(y, y_pred)
+    return r2, model.coef_[0], model.intercept_, y_pred
+
+
+def plot_dimensional_matrix(D, filename='dimensional_matrix.png'):
+    fig, ax = plt.subplots(figsize=(8,4))
+    cax = ax.matshow(D, cmap='viridis')
+    ax.set_xticks(range(7))
+    ax.set_xticklabels(['h', 'lambda', 'delta_T', 'g', 'alpha', 'nu', 'kappa'])
+    ax.set_yticks(range(4))
+    ax.set_yticklabels(['M', 'L', 'T', 'Theta'])
+    for (i, j), val in np.ndenumerate(D):
+        ax.text(j, i, f'{val:.1f}', ha='center', va='center', color='w')
+    fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+    ax.set_title('Dimensional Matrix (Rows: M,L,T,Theta; Columns: Physical Quantities)')
+    fig.tight_layout()
+    try:
+        fig.savefig(filename)
+        logging.info(f'Dimensional matrix figure saved as {filename}')
+    except Exception as e:
+        logging.error(f'Error saving figure {filename}: {e}')
+    plt.close(fig)
+
+
+def plot_regression_fit(x, y, y_pred, filename='regression_fit.png'):
+    fig, ax = plt.subplots(figsize=(6,5))
+    ax.scatter(x, y, color='blue', label='Data')
+    ax.plot(x, y_pred, color='red', label='Fit')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlabel('Dimensionless Group')
+    ax.set_ylabel('Nusselt Number (Nu)')
+    ax.set_title('Log-Log Regression Fit of Best Dimensionless Group vs Nu')
+    ax.legend()
+    fig.tight_layout()
+    try:
+        fig.savefig(filename)
+        logging.info(f'Regression fit figure saved as {filename}')
+    except Exception as e:
+        logging.error(f'Error saving figure {filename}: {e}')
+    plt.close(fig)
+
+
+def main():
+    # Load data
+    data = pd.read_csv('./dataset_rayben.csv')
+
+    # Construct dimensional matrix
+    D = construct_dimensional_matrix()
+
+    # Plot and save dimensional matrix
+    plot_dimensional_matrix(D, 'dimensional_matrix.png')
+
+    # Compute null space (dimensionless groups basis)
+    ns = null_space(D)
+
+    # Generate candidate dimensionless exponents with configurable parameters
+    candidates = generate_candidate_exponents(ns, max_abs=3, max_denominator=6, max_sum_abs=6)
+
+    Nu = data['Nu'].values
+
+    best_r2 = -np.inf
+    best_exp = None
+    best_coef = None
+    best_intercept = None
+    best_pred = None
+
+    for exps in candidates:
+        try:
+            dim_group = compute_dimensionless_group(data, exps)
+            if np.any(dim_group <= 0):
+                continue
+            r2, coef, intercept, y_pred = fit_and_score(dim_group, Nu)
+            if r2 > best_r2 and r2 > 0.95:
+                best_r2 = r2
+                best_exp = exps
+                best_coef = coef
+                best_intercept = intercept
+                best_pred = y_pred
+        except Exception as e:
+            logging.warning(f'Exception during candidate evaluation: {e}')
+            continue
+
+    # Print dimensional matrix
+    print("Dimensional matrix (rows: M,L,T,Theta; columns: h,lambda,delta_T,g,alpha,nu,kappa):")
+    print(D)
+
+    if best_exp is not None:
+        print(f"\nBest dimensionless group exponents normalized by alpha (R^2={best_r2:.4f}):")
+        cols = ['h', 'lambda', 'delta_T', 'g', 'alpha', 'nu', 'kappa']
+        for c, e in zip(cols, best_exp):
+            frac = e.limit_denominator(12)
+            print(f"{c}: {frac.numerator}/{frac.denominator} ({float(frac):.3f})")
+        print(f"\nRegression model: log(Nu) = {best_intercept:.3f} + {best_coef:.3f} * log(Dimensionless Group)")
+
+        # Plot and save regression fit
+        dim_group_vals = compute_dimensionless_group(data, best_exp)
+        plot_regression_fit(dim_group_vals, Nu, best_pred, 'best_dimensionless_group_fit.png')
+    else:
+        print("\nNo dimensionless group found with R^2 > 0.95 under given constraints.")
+
+if __name__ == '__main__':
+    main()
+```
+****************************************
