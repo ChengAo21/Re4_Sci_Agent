@@ -1,0 +1,468 @@
+
+****************************************
+```python
+
+#!/usr/bin/env python3
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from math import floor
+
+# Global physical parameter
+Re = 100.0
+visc = 1.0 / Re   # explicit global visc as required
+
+# Penalization parameter (smaller = stronger enforcement)
+eta = 1e-3
+
+
+def build_grid(x1=3.0, x2=8.0, y1=3.0, y2=3.0, Nx=220, Ny=120):
+    Lx = x1 + x2
+    Ly = y1 + y2
+    dx = Lx / Nx
+    dy = Ly / Ny
+
+    # pressure cell centers
+    x_p = np.linspace(-x1 + dx/2, x2 - dx/2, Nx)
+    y_p = np.linspace(-y1 + dy/2, y2 - dy/2, Ny)
+
+    # u at vertical faces: x faces i=0..Nx, y centers j=0..Ny-1
+    x_u = np.linspace(-x1, x2, Nx+1)
+    y_u = np.linspace(-y1 + dy/2, y2 - dy/2, Ny)
+
+    # v at horizontal faces: x centers i=0..Nx-1, y faces j=0..Ny
+    x_v = np.linspace(-x1 + dx/2, x2 - dx/2, Nx)
+    y_v = np.linspace(-y1, y2, Ny+1)
+
+    return dx, dy, x_u, y_u, x_v, y_v, x_p, y_p
+
+
+# Index mapping consistent with Fortran-order flattening (i fastest)
+def idx_u(i, j, Nx, Ny):
+    return j * (Nx + 1) + i
+
+
+def idx_v(i, j, Nx, Ny):
+    return j * Nx + i
+
+
+def idx_p(i, j, Nx, Ny):
+    return j * Nx + i
+
+
+def build_cylinder_masks(x_u, y_u, x_v, y_v, radius=0.5):
+    # Use 'ij' indexing so Xu.shape == (len(x_u), len(y_u)) == (Nx+1, Ny)
+    Xu, Yu = np.meshgrid(x_u, y_u, indexing='ij')
+    Xv, Yv = np.meshgrid(x_v, y_v, indexing='ij')
+
+    chi_u = ((Xu**2 + Yu**2) <= radius**2).astype(float)
+    chi_v = ((Xv**2 + Yv**2) <= radius**2).astype(float)
+
+    return chi_u, chi_v
+
+
+def build_laplacian_u(Nx, Ny, dx, dy, inlet_mask):
+    Nu = (Nx + 1) * Ny
+    data = []
+    rows = []
+    cols = []
+
+    for j in range(Ny):
+        for i in range(Nx + 1):
+            row = idx_u(i, j, Nx, Ny)
+            if inlet_mask[row]:
+                rows.append(row); cols.append(row); data.append(1.0)
+                continue
+
+            center = 0.0
+            # left
+            if i - 1 >= 0:
+                left = idx_u(i - 1, j, Nx, Ny)
+                rows.append(row); cols.append(left); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            # right
+            if i + 1 <= Nx:
+                right = idx_u(i + 1, j, Nx, Ny)
+                rows.append(row); cols.append(right); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            # down
+            if j - 1 >= 0:
+                down = idx_u(i, j - 1, Nx, Ny)
+                rows.append(row); cols.append(down); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+            # up
+            if j + 1 <= Ny - 1:
+                up = idx_u(i, j + 1, Nx, Ny)
+                rows.append(row); cols.append(up); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+
+            rows.append(row); cols.append(row); data.append(center)
+
+    L = sp.csr_matrix((data, (rows, cols)), shape=(Nu, Nu))
+    return L
+
+
+def build_laplacian_v(Nx, Ny, dx, dy, v_dirichlet_mask):
+    Nv = Nx * (Ny + 1)
+    data = []
+    rows = []
+    cols = []
+
+    for j in range(Ny + 1):
+        for i in range(Nx):
+            row = idx_v(i, j, Nx, Ny)
+            if v_dirichlet_mask[row]:
+                rows.append(row); cols.append(row); data.append(1.0)
+                continue
+
+            center = 0.0
+            # x-direction
+            if i - 1 >= 0:
+                left = idx_v(i - 1, j, Nx, Ny)
+                rows.append(row); cols.append(left); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            if i + 1 <= Nx - 1:
+                right = idx_v(i + 1, j, Nx, Ny)
+                rows.append(row); cols.append(right); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            # y-direction
+            if j - 1 >= 0:
+                down = idx_v(i, j - 1, Nx, Ny)
+                rows.append(row); cols.append(down); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+            if j + 1 <= Ny:
+                up = idx_v(i, j + 1, Nx, Ny)
+                rows.append(row); cols.append(up); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+
+            rows.append(row); cols.append(row); data.append(center)
+
+    L = sp.csr_matrix((data, (rows, cols)), shape=(Nv, Nv))
+    return L
+
+
+def build_laplacian_p(Nx, Ny, dx, dy, pinned_idx=0):
+    Np = Nx * Ny
+    data = []
+    rows = []
+    cols = []
+
+    for j in range(Ny):
+        for i in range(Nx):
+            row = idx_p(i, j, Nx, Ny)
+            if row == pinned_idx:
+                rows.append(row); cols.append(row); data.append(1.0)
+                continue
+
+            center = 0.0
+            if i - 1 >= 0:
+                left = idx_p(i - 1, j, Nx, Ny)
+                rows.append(row); cols.append(left); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            if i + 1 <= Nx - 1:
+                right = idx_p(i + 1, j, Nx, Ny)
+                rows.append(row); cols.append(right); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            if j - 1 >= 0:
+                down = idx_p(i, j - 1, Nx, Ny)
+                rows.append(row); cols.append(down); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+            if j + 1 <= Ny - 1:
+                up = idx_p(i, j + 1, Nx, Ny)
+                rows.append(row); cols.append(up); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+
+            rows.append(row); cols.append(row); data.append(center)
+
+    L = sp.csr_matrix((data, (rows, cols)), shape=(Np, Np))
+    return L
+
+
+def divergence(u, v, Nx, Ny, dx, dy):
+    # u shape: (Nx+1, Ny), v shape: (Nx, Ny+1)
+    return (u[1:Nx+1, :] - u[0:Nx, :]) / dx + (v[:, 1:Ny+1] - v[:, 0:Ny]) / dy
+
+
+def gradient_p_to_u(p, Nx, Ny, dx, dy):
+    dpdx = np.zeros((Nx + 1, Ny))
+    dpdx[1:Nx, :] = (p[1:Nx, :] - p[0:Nx-1, :]) / dx
+    dpdx[0, :] = (p[0, :] - p[0, :]) / dx
+    dpdx[Nx, :] = (p[Nx - 1, :] - p[Nx - 1, :]) / dx
+    return dpdx
+
+
+def gradient_p_to_v(p, Nx, Ny, dx, dy):
+    dpdy = np.zeros((Nx, Ny + 1))
+    if Ny >= 2:
+        dpdy[:, 1:Ny] = (p[:, 1:Ny] - p[:, 0:Ny-1]) / dy
+    dpdy[:, 0] = (p[:, 0] - p[:, 0]) / dy
+    dpdy[:, Ny] = (p[:, Ny - 1] - p[:, Ny - 1]) / dy
+    return dpdy
+
+
+# Flatten/reshape consistently in Fortran order to match idx_* ordering
+def flatten(arr):
+    return arr.ravel(order='F')
+
+
+def unflatten_u(vec, Nx, Ny):
+    return vec.reshape((Nx + 1, Ny), order='F')
+
+
+def unflatten_v(vec, Nx, Ny):
+    return vec.reshape((Nx, Ny + 1), order='F')
+
+
+def unflatten_p(vec, Nx, Ny):
+    return vec.reshape((Nx, Ny), order='F')
+
+
+def compute_convective(u, v, Nx, Ny, dx, dy):
+    # u: (Nx+1,Ny), v: (Nx,Ny+1)
+    # du/dx
+    du_dx = np.zeros_like(u)
+    du_dx[1:Nx, :] = (u[2:Nx+1, :] - u[0:Nx-1, :]) / (2 * dx)
+    du_dx[0, :] = (u[1, :] - u[0, :]) / dx
+    du_dx[Nx, :] = (u[Nx, :] - u[Nx - 1, :]) / dx
+
+    # du/dy
+    du_dy = np.zeros_like(u)
+    if Ny >= 3:
+        du_dy[:, 1:Ny-1] = (u[:, 2:Ny] - u[:, 0:Ny-2]) / (2 * dy)
+    if Ny >= 2:
+        du_dy[:, 0] = (u[:, 1] - u[:, 0]) / dy
+        du_dy[:, Ny - 1] = (u[:, Ny - 1] - u[:, Ny - 2]) / dy
+
+    # interpolate v to u locations: v_at_u shape (Nx+1,Ny)
+    v_at_u = np.zeros_like(u)
+    # interior faces
+    if Nx >= 2:
+        v_at_u[1:Nx, :] = 0.5 * (v[0:Nx-1, 0:Ny] + v[1:Nx, 0:Ny])
+    # boundaries
+    v_at_u[0, :] = v[0, 0:Ny]
+    v_at_u[Nx, :] = v[Nx-1, 0:Ny]
+
+    N_u = u * du_dx + v_at_u * du_dy
+
+    # dv/dy
+    dv_dy = np.zeros_like(v)
+    if Ny >= 2:
+        dv_dy[:, 1:Ny] = (v[:, 2:Ny+1] - v[:, 0:Ny-1]) / (2 * dy)
+        dv_dy[:, 0] = (v[:, 1] - v[:, 0]) / dy
+        dv_dy[:, Ny] = (v[:, Ny] - v[:, Ny - 1]) / dy
+    else:
+        dv_dy[:] = 0.0
+
+    # dv/dx
+    dv_dx = np.zeros_like(v)
+    if Nx >= 3:
+        dv_dx[1:Nx-1, :] = (v[2:Nx, :] - v[0:Nx-2, :]) / (2 * dx)
+    if Nx >= 2:
+        dv_dx[0, :] = (v[1, :] - v[0, :]) / dx
+        dv_dx[Nx-1, :] = (v[Nx-1, :] - v[Nx-2, :]) / dx
+
+    # interpolate u to v locations: u_at_v shape (Nx, Ny+1)
+    u_at_v = np.zeros_like(v)
+    # interior in y: j=1..Ny-1
+    if Ny >= 2:
+        # four-point average for interior faces
+        u_at_v[:, 1:Ny] = 0.25 * (
+            u[0:Nx, 0:Ny-1] + u[1:Nx+1, 0:Ny-1] + u[0:Nx, 1:Ny] + u[1:Nx+1, 1:Ny]
+        )
+    # bottom and top faces: use 2-point average
+    u_at_v[:, 0] = 0.5 * (u[0:Nx, 0] + u[1:Nx+1, 0])
+    u_at_v[:, Ny] = 0.5 * (u[0:Nx, Ny-1] + u[1:Nx+1, Ny-1])
+
+    N_v = u_at_v * dv_dx + v * dv_dy
+    return N_u, N_v
+
+
+def main():
+    x1 = 3.0; x2 = 8.0; y1 = 3.0; y2 = 3.0
+    # moderate grid for runtime
+    Nx = 220
+    Ny = 120
+
+    dx, dy, x_u, y_u, x_v, y_v, x_p, y_p = build_grid(x1, x2, y1, y2, Nx=Nx, Ny=Ny)
+
+    # masks for cylinder
+    chi_u, chi_v = build_cylinder_masks(x_u, y_u, x_v, y_v, radius=0.5)
+
+    Nu = (Nx + 1) * Ny
+    Nv = Nx * (Ny + 1)
+    Np = Nx * Ny
+
+    # inlet u-face flattened indices
+    inlet_u_indices = [idx_u(0, j, Nx, Ny) for j in range(Ny)]
+    inlet_u_mask = np.zeros(Nu, dtype=bool)
+    inlet_u_mask[inlet_u_indices] = True
+
+    # v Dirichlet (top/bottom)
+    v_zero_mask = np.zeros(Nv, dtype=bool)
+    for i in range(Nx):
+        v_zero_mask[idx_v(i, 0, Nx, Ny)] = True
+        v_zero_mask[idx_v(i, Ny, Nx, Ny)] = True
+
+    print('Building operators...')
+
+    L_u = build_laplacian_u(Nx, Ny, dx, dy, inlet_u_mask)
+    L_v = build_laplacian_v(Nx, Ny, dx, dy, v_zero_mask)
+
+    # choose pressure pin near (0,0)
+    i0 = int(np.argmin(np.abs(x_p - 0.0)))
+    j0 = int(np.argmin(np.abs(y_p - 0.0)))
+    pinned_idx = idx_p(i0, j0, Nx, Ny)
+    L_p = build_laplacian_p(Nx, Ny, dx, dy, pinned_idx=pinned_idx)
+
+    # Time-stepping
+    T = 20.0
+    Umax = 1.0
+    CFL = 0.45
+    dt = CFL * min(dx, dy) / Umax
+    nsteps = int(floor(T / dt))
+    dt = T / nsteps
+
+    print(f'Nx={Nx} Ny={Ny} dx={dx:.4f} dy={dy:.4f} dt={dt:.5f} steps={nsteps}')
+
+    # Build velocity solve matrices once
+    Iu = sp.eye(Nu, format='csr')
+    Iv = sp.eye(Nv, format='csr')
+
+    chi_u_flat = chi_u.ravel(order='F')
+    chi_v_flat = chi_v.ravel(order='F')
+
+    Pen_u = sp.diags(dt * (chi_u_flat / eta), format='csr')
+    Pen_v = sp.diags(dt * (chi_v_flat / eta), format='csr')
+
+    Au = Iu - dt * visc * L_u + Pen_u
+    Av = Iv - dt * visc * L_v + Pen_v
+
+    # enforce Dirichlet rows in Au/Av
+    Au = Au.tolil()
+    for idx in inlet_u_indices:
+        Au.rows[idx] = [idx]
+        Au.data[idx] = [1.0]
+    Au = Au.tocsc()
+
+    Av = Av.tolil()
+    v_zero_indices = np.nonzero(v_zero_mask)[0].tolist()
+    for idx in v_zero_indices:
+        Av.rows[idx] = [idx]
+        Av.data[idx] = [1.0]
+    Av = Av.tocsc()
+
+    print('Factorizing velocity matrices...')
+    Au_fac = spla.splu(Au)
+    Av_fac = spla.splu(Av)
+
+    print('Factorizing pressure Poisson...')
+    Lp_csc = L_p.tocsc()
+    Lp_fac = spla.splu(Lp_csc)
+
+    # initialize
+    u = np.ones((Nx + 1, Ny)) * 1.0
+    v = np.zeros((Nx, Ny + 1))
+    p = np.zeros((Nx, Ny))
+
+    # zero inside cylinder initially via penalization mask
+    u = u * (1.0 - chi_u)
+    v = v * (1.0 - chi_v)
+
+    N_u, N_v = compute_convective(u, v, Nx, Ny, dx, dy)
+    N_u_prev = N_u.copy()
+    N_v_prev = N_v.copy()
+
+    u_flat = flatten(u)
+    v_flat = flatten(v)
+
+    inlet_u_flat_indices = inlet_u_indices
+    v_zero_flat_indices = v_zero_indices
+
+    print('Starting time-stepping...')
+    progress_interval = max(1, nsteps // 10)
+    for step in range(1, nsteps + 1):
+        N_u, N_v = compute_convective(u, v, Nx, Ny, dx, dy)
+        N_u_ex = 1.5 * N_u - 0.5 * N_u_prev
+        N_v_ex = 1.5 * N_v - 0.5 * N_v_prev
+
+        rhs_u = flatten(u) - dt * flatten(N_u_ex)
+        rhs_v = flatten(v) - dt * flatten(N_v_ex)
+
+        for idx in inlet_u_flat_indices:
+            rhs_u[idx] = 1.0
+        for idx in v_zero_flat_indices:
+            rhs_v[idx] = 0.0
+
+        u_star_flat = Au_fac.solve(rhs_u)
+        v_star_flat = Av_fac.solve(rhs_v)
+
+        u_star = unflatten_u(u_star_flat, Nx, Ny)
+        v_star = unflatten_v(v_star_flat, Nx, Ny)
+
+        div_u_star = divergence(u_star, v_star, Nx, Ny, dx, dy)
+        rhs_p = (1.0 / dt) * flatten(div_u_star)
+        rhs_p[pinned_idx] = 0.0
+
+        p_corr_flat = Lp_fac.solve(rhs_p)
+        p_corr = unflatten_p(p_corr_flat, Nx, Ny)
+
+        dpdx = gradient_p_to_u(p_corr, Nx, Ny, dx, dy)
+        dpdy = gradient_p_to_v(p_corr, Nx, Ny, dx, dy)
+
+        u_new = u_star - dt * dpdx
+        v_new = v_star - dt * dpdy
+
+        # enforce BCs
+        u_new[0, :] = 1.0
+        u_new[:, 0] = u_new[:, 1]
+        u_new[:, Ny - 1] = u_new[:, Ny - 2]
+        u_new[Nx, :] = u_new[Nx - 1, :]
+        v_new[:, 0] = 0.0
+        v_new[:, Ny] = 0.0
+
+        u = u_new.copy()
+        v = v_new.copy()
+        p = p_corr.copy()
+
+        N_u_prev = N_u.copy()
+        N_v_prev = N_v.copy()
+
+        if (step % progress_interval) == 0 or step == nsteps:
+            perc = int(100 * step / nsteps)
+            uc = 0.5 * (u[0:Nx, :] + u[1:Nx + 1, :])
+            vc = 0.5 * (v[:, 0:Ny] + v[:, 1:Ny + 1])
+            KE = 0.5 * np.sum(uc**2 + vc**2) * dx * dy
+            umax = max(np.abs(u).max(), np.abs(v).max())
+            print(f'Step {step}/{nsteps} ({perc}%) t={step*dt:.3f} umax={umax:.3f} KE={KE:.5f}')
+
+    # final field and plotting
+    u_center = 0.5 * (u[0:Nx, :] + u[1:Nx + 1, :])
+    v_center = 0.5 * (v[:, 0:Ny] + v[:, 1:Ny + 1])
+    vel_mag = np.sqrt(u_center**2 + v_center**2)
+
+    Xp, Yp = np.meshgrid(x_p, y_p, indexing='xy')
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    cp = ax.contourf(Xp, Yp, vel_mag.T, levels=50, cmap='RdBu_r')
+    cbar = fig.colorbar(cp, ax=ax)
+    cbar.set_label('Velocity magnitude')
+    ax.set_aspect('equal')
+    ax.set_xlabel('x'); ax.set_ylabel('y')
+    ax.set_title(f'Velocity magnitude at t={T:.2f}, Re={Re:.0f}')
+
+    theta = np.linspace(0, 2 * np.pi, 200)
+    xc = 0.5 * np.cos(theta)
+    yc = 0.5 * np.sin(theta)
+    ax.plot(xc, yc, 'k', linewidth=1.0)
+
+    fig.tight_layout()
+    fig.savefig('velocity_magnitude.png', dpi=200)
+    print('Saved figure to velocity_magnitude.png')
+
+if __name__ == '__main__':
+    main()
+```
+****************************************

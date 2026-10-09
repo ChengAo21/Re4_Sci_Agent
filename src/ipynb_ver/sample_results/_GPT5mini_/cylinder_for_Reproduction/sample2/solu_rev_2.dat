@@ -1,0 +1,556 @@
+
+****************************************
+```python
+#!/usr/bin/env python3
+"""
+2D incompressible Navier-Stokes around a cylinder on a staggered MAC grid
+with immersed-boundary volume penalization. The code follows the review
+recommendations: consistent indexing (indexing='ij'), Fortran-order flattening
+(order='F'), vectorized convective calculations and single factorization
+of linear systems.
+"""
+
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from math import floor
+
+# Global physical parameter
+Re = 100.0
+visc = 1.0 / Re   # use visc everywhere per instructions
+
+# Penalization parameter (smaller = stronger enforcement)
+eta = 1e-3
+
+
+def build_grid(x1=3.0, x2=8.0, y1=3.0, y2=3.0, Nx=220, Ny=120):
+    """Build domain and MAC grid coordinates.
+    Domain: x in [-x1, x2], y in [-y1, y2] with cylinder centered at (0,0).
+    Returns dx, dy and coordinate arrays for u (vertical faces), v (horizontal faces), p (cells).
+    """
+    Lx = x1 + x2
+    Ly = y1 + y2
+    dx = Lx / Nx
+    dy = Ly / Ny
+
+    # pressure cell centers (Nx x Ny)
+    x_p = np.linspace(-x1 + dx/2, x2 - dx/2, Nx)
+    y_p = np.linspace(-y1 + dy/2, y2 - dy/2, Ny)
+
+    # u at vertical faces: x faces i=0..Nx (Nx+1), y centers j=0..Ny-1 (Ny)
+    x_u = np.linspace(-x1, x2, Nx+1)
+    y_u = np.linspace(-y1 + dy/2, y2 - dy/2, Ny)
+
+    # v at horizontal faces: x centers i=0..Nx-1 (Nx), y faces j=0..Ny (Ny+1)
+    x_v = np.linspace(-x1 + dx/2, x2 - dx/2, Nx)
+    y_v = np.linspace(-y1, y2, Ny+1)
+
+    return dx, dy, x_u, y_u, x_v, y_v, x_p, y_p
+
+
+# index helpers consistent with Fortran-order flattening (order='F')
+def idx_u(i, j, Nx, Ny):
+    return i + j * (Nx + 1)
+
+
+def idx_v(i, j, Nx, Ny):
+    return i + j * Nx
+
+
+def idx_p(i, j, Nx, Ny):
+    return i + j * Nx
+
+
+def build_cylinder_masks(x_u, y_u, x_v, y_v, radius=0.5):
+    """Build boolean masks chi_u and chi_v for penalization (1 inside cylinder).
+    Use indexing='ij' so output shapes match unstaggered array shapes:
+      chi_u: (Nx+1, Ny), chi_v: (Nx, Ny+1)
+    """
+    Xu, Yu = np.meshgrid(x_u, y_u, indexing='ij')
+    Xv, Yv = np.meshgrid(x_v, y_v, indexing='ij')
+
+    chi_u = ((Xu**2 + Yu**2) <= radius**2).astype(float)
+    chi_v = ((Xv**2 + Yv**2) <= radius**2).astype(float)
+
+    return chi_u, chi_v
+
+
+def build_laplacian_u(Nx, Ny, dx, dy, inlet_u_indices):
+    """Build sparse Laplacian (second-order) for u-grid (Nu = (Nx+1)*Ny).
+    Dirichlet inlet rows are left as identity elsewhere we assemble a standard 5-point
+    stencil with mirror/one-sided treatment for outer Neumann-like boundaries.
+    """
+    Nu = (Nx + 1) * Ny
+    data = []
+    rows = []
+    cols = []
+
+    for j in range(Ny):
+        for i in range(Nx + 1):
+            row = idx_u(i, j, Nx, Ny)
+            if row in inlet_u_indices:
+                rows.append(row); cols.append(row); data.append(1.0)
+                continue
+
+            center = 0.0
+            # left neighbor
+            if i - 1 >= 0:
+                left = idx_u(i - 1, j, Nx, Ny)
+                rows.append(row); cols.append(left); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            # right neighbor
+            if i + 1 <= Nx:
+                right = idx_u(i + 1, j, Nx, Ny)
+                rows.append(row); cols.append(right); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+
+            # down (j-1)
+            if j - 1 >= 0:
+                down = idx_u(i, j - 1, Nx, Ny)
+                rows.append(row); cols.append(down); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+            # up (j+1)
+            if j + 1 <= Ny - 1:
+                up = idx_u(i, j + 1, Nx, Ny)
+                rows.append(row); cols.append(up); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+
+            rows.append(row); cols.append(row); data.append(center)
+
+    L = sp.csr_matrix((data, (rows, cols)), shape=(Nu, Nu))
+    return L
+
+
+def build_laplacian_v(Nx, Ny, dx, dy, v_dirichlet_indices):
+    """Build sparse Laplacian for v-grid (Nv = Nx*(Ny+1)).
+    Dirichlet rows are set to identity; else assemble 5-point stencil.
+    """
+    Nv = Nx * (Ny + 1)
+    data = []
+    rows = []
+    cols = []
+
+    for j in range(Ny + 1):
+        for i in range(Nx):
+            row = idx_v(i, j, Nx, Ny)
+            if row in v_dirichlet_indices:
+                rows.append(row); cols.append(row); data.append(1.0)
+                continue
+
+            center = 0.0
+            # x-direction
+            if i - 1 >= 0:
+                left = idx_v(i - 1, j, Nx, Ny)
+                rows.append(row); cols.append(left); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            if i + 1 <= Nx - 1:
+                right = idx_v(i + 1, j, Nx, Ny)
+                rows.append(row); cols.append(right); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+
+            # y-direction
+            if j - 1 >= 0:
+                down = idx_v(i, j - 1, Nx, Ny)
+                rows.append(row); cols.append(down); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+            if j + 1 <= Ny:
+                up = idx_v(i, j + 1, Nx, Ny)
+                rows.append(row); cols.append(up); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+
+            rows.append(row); cols.append(row); data.append(center)
+
+    L = sp.csr_matrix((data, (rows, cols)), shape=(Nv, Nv))
+    return L
+
+
+def build_laplacian_p(Nx, Ny, dx, dy, pinned_idx=0):
+    """Pressure Poisson Laplacian on pressure cell centers (Np = Nx*Ny).
+    Pin one node to remove nullspace; choose pinned index at outflow center in main.
+    """
+    Np = Nx * Ny
+    data = []
+    rows = []
+    cols = []
+
+    for j in range(Ny):
+        for i in range(Nx):
+            row = idx_p(i, j, Nx, Ny)
+            if row == pinned_idx:
+                rows.append(row); cols.append(row); data.append(1.0)
+                continue
+
+            center = 0.0
+            # left
+            if i - 1 >= 0:
+                left = idx_p(i - 1, j, Nx, Ny)
+                rows.append(row); cols.append(left); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            # right
+            if i + 1 <= Nx - 1:
+                right = idx_p(i + 1, j, Nx, Ny)
+                rows.append(row); cols.append(right); data.append(1.0 / dx**2)
+                center += -1.0 / dx**2
+            # down
+            if j - 1 >= 0:
+                down = idx_p(i, j - 1, Nx, Ny)
+                rows.append(row); cols.append(down); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+            # up
+            if j + 1 <= Ny - 1:
+                up = idx_p(i, j + 1, Nx, Ny)
+                rows.append(row); cols.append(up); data.append(1.0 / dy**2)
+                center += -1.0 / dy**2
+
+            rows.append(row); cols.append(row); data.append(center)
+
+    L = sp.csr_matrix((data, (rows, cols)), shape=(Np, Np))
+    return L
+
+
+def divergence(u, v, Nx, Ny, dx, dy):
+    """Compute discrete divergence at pressure cell centers from face-centered u and v.
+    u shape: (Nx+1, Ny), v shape: (Nx, Ny+1)
+    returns div shape (Nx, Ny)
+    """
+    div = (u[1:Nx+1, :] - u[0:Nx, :]) / dx + (v[:, 1:Ny+1] - v[:, 0:Ny]) / dy
+    return div
+
+
+def gradient_p_to_u(p, Nx, Ny, dx, dy):
+    """Compute dp/dx at u face locations from cell-centered pressure p (Nx x Ny).
+    Returns array of shape (Nx+1, Ny)
+    """
+    dpdx = np.zeros((Nx + 1, Ny))
+    # interior faces
+    if Nx > 1:
+        dpdx[1:Nx, :] = (p[1:Nx, :] - p[0:Nx-1, :]) / dx
+    # boundaries: one-sided -> assume zero-gradient approximation
+    dpdx[0, :] = 0.0
+    dpdx[Nx, :] = 0.0
+    return dpdx
+
+
+def gradient_p_to_v(p, Nx, Ny, dx, dy):
+    """Compute dp/dy at v face locations from p.
+    Returns array shape (Nx, Ny+1)
+    """
+    dpdy = np.zeros((Nx, Ny + 1))
+    if Ny > 1:
+        dpdy[:, 1:Ny] = (p[:, 1:Ny] - p[:, 0:Ny-1]) / dy
+    dpdy[:, 0] = 0.0
+    dpdy[:, Ny] = 0.0
+    return dpdy
+
+
+def compute_convective(u, v, Nx, Ny, dx, dy):
+    """Vectorized convective term computation on staggered grid.
+    Returns N_u (Nx+1, Ny) and N_v (Nx, Ny+1).
+    """
+    # du/dx
+    du_dx = np.zeros_like(u)
+    if Nx >= 2:
+        du_dx[1:Nx, :] = (u[2:Nx+1, :] - u[0:Nx-1, :]) / (2 * dx)
+    du_dx[0, :] = (u[1, :] - u[0, :]) / dx
+    du_dx[Nx, :] = (u[Nx, :] - u[Nx - 1, :]) / dx
+
+    # du/dy
+    du_dy = np.zeros_like(u)
+    if Ny >= 3:
+        du_dy[:, 1:Ny-1] = (u[:, 2:Ny] - u[:, 0:Ny-2]) / (2 * dy)
+    if Ny >= 2:
+        du_dy[:, 0] = (u[:, 1] - u[:, 0]) / dy
+        du_dy[:, Ny-1] = (u[:, Ny-1] - u[:, Ny-2]) / dy
+
+    # interpolate v to u locations (vectorized)
+    v_at_u = np.zeros_like(u)
+    if Nx >= 2:
+        v_at_u[1:Nx, :] = 0.5 * (v[0:Nx-1, 0:Ny] + v[1:Nx, 0:Ny])
+    # boundaries
+    v_at_u[0, :] = v[0, 0:Ny]
+    v_at_u[Nx, :] = v[Nx-1, 0:Ny]
+
+    N_u = u * du_dx + v_at_u * du_dy
+
+    # dv/dy
+    dv_dy = np.zeros_like(v)
+    if Ny >= 2:
+        dv_dy[:, 1:Ny] = (v[:, 2:Ny+1] - v[:, 0:Ny-1]) / (2 * dy)
+        dv_dy[:, 0] = (v[:, 1] - v[:, 0]) / dy
+        dv_dy[:, Ny] = (v[:, Ny] - v[:, Ny-1]) / dy
+
+    # dv/dx
+    dv_dx = np.zeros_like(v)
+    if Nx >= 3:
+        dv_dx[1:Nx-1, :] = (v[2:Nx, :] - v[0:Nx-2, :]) / (2 * dx)
+    if Nx >= 2:
+        dv_dx[0, :] = (v[1, :] - v[0, :]) / dx
+        dv_dx[Nx-1, :] = (v[Nx-1, :] - v[Nx-2, :]) / dx
+
+    # interpolate u to v locations (vectorized)
+    u_at_v = np.zeros_like(v)
+    # interior v-j faces (1..Ny-1) use average of four surrounding u-values
+    if Ny >= 2:
+        # u left-bottom: u[0:Nx, 0:Ny-1]
+        # u right-bottom: u[1:Nx+1, 0:Ny-1]
+        # u left-top: u[0:Nx, 1:Ny]
+        # u right-top: u[1:Nx+1, 1:Ny]
+        u_at_v[:, 1:Ny] = 0.25 * (
+            u[0:Nx, 0:Ny-1] + u[1:Nx+1, 0:Ny-1] + u[0:Nx, 1:Ny] + u[1:Nx+1, 1:Ny]
+        )
+    # bottom j=0: average bottom cell-centered u's
+    u_at_v[:, 0] = 0.5 * (u[0:Nx, 0] + u[1:Nx+1, 0])
+    # top j=Ny: average top cell-centered u's
+    u_at_v[:, Ny] = 0.5 * (u[0:Nx, Ny-1] + u[1:Nx+1, Ny-1])
+
+    N_v = u_at_v * dv_dx + v * dv_dy
+
+    return N_u, N_v
+
+
+# consistent flatten/unflatten using Fortran order
+def flatten(arr):
+    return arr.ravel(order='F')
+
+
+def unflatten_u(vec, Nx, Ny):
+    return vec.reshape((Nx + 1, Ny), order='F')
+
+
+def unflatten_v(vec, Nx, Ny):
+    return vec.reshape((Nx, Ny + 1), order='F')
+
+
+def unflatten_p(vec, Nx, Ny):
+    return vec.reshape((Nx, Ny), order='F')
+
+
+def apply_dirichlet_u(vec_u, u_inlet_value, inlet_indices):
+    for idx in inlet_indices:
+        vec_u[idx] = u_inlet_value
+    return vec_u
+
+
+def apply_dirichlet_v(vec_v, v_zero_indices):
+    for idx in v_zero_indices:
+        vec_v[idx] = 0.0
+    return vec_v
+
+
+def main():
+    # Domain and grid
+    x1 = 3.0
+    x2 = 8.0
+    y1 = 3.0
+    y2 = 3.0
+    # grid resolution (moderate)
+    Nx = 220
+    Ny = 120
+
+    dx, dy, x_u, y_u, x_v, y_v, x_p, y_p = build_grid(x1, x2, y1, y2, Nx=Nx, Ny=Ny)
+
+    # construct masks for cylinder penalization
+    chi_u, chi_v = build_cylinder_masks(x_u, y_u, x_v, y_v, radius=0.5)
+
+    # Flattened sizes
+    Nu = (Nx + 1) * Ny
+    Nv = Nx * (Ny + 1)
+    Np = Nx * Ny
+
+    # inlet u-face indices (left boundary) flattened
+    inlet_u_indices = [idx_u(0, j, Nx, Ny) for j in range(Ny)]
+    inlet_u_set = set(inlet_u_indices)
+
+    # v Dirichlet indices (top/bottom)
+    v_zero_indices = set()
+    for i in range(Nx):
+        v_zero_indices.add(idx_v(i, 0, Nx, Ny))   # bottom v=0
+        v_zero_indices.add(idx_v(i, Ny, Nx, Ny))  # top v=0
+
+    # Build Laplacians
+    print('Building operators...')
+    L_u = build_laplacian_u(Nx, Ny, dx, dy, inlet_u_set)
+    L_v = build_laplacian_v(Nx, Ny, dx, dy, v_zero_indices)
+    # choose a pinned pressure index at outflow center to minimize bias
+    pinned_idx = idx_p(Nx - 1, Ny // 2, Nx, Ny)
+    L_p = build_laplacian_p(Nx, Ny, dx, dy, pinned_idx=pinned_idx)
+
+    # Time-stepping parameters
+    T = 20.0
+    Umax = 1.0
+    CFL = 0.45
+    dt = CFL * min(dx, dy) / Umax
+    nsteps = int(floor(T / dt))
+    dt = T / nsteps
+
+    print(f'Nx={Nx} Ny={Ny} dx={dx:.4f} dy={dy:.4f} dt={dt:.5f} steps={nsteps}')
+
+    # Build constant matrices for velocity solves: Au = I - dt*visc*L_u + dt*(chi/eta) diag
+    Iu = sp.eye(Nu, format='csr')
+    Iv = sp.eye(Nv, format='csr')
+
+    # diag penalization arrays (Fortran order)
+    chi_u_flat = flatten(chi_u)
+    chi_v_flat = flatten(chi_v)
+
+    Pen_u = sp.diags(dt * (chi_u_flat / eta), format='csr')
+    Pen_v = sp.diags(dt * (chi_v_flat / eta), format='csr')
+
+    Au = Iu - dt * visc * L_u + Pen_u
+    Av = Iv - dt * visc * L_v + Pen_v
+
+    # Enforce Dirichlet rows in Au and Av to identity
+    Au = Au.tolil()
+    for idx in inlet_u_indices:
+        Au.rows[idx] = [idx]
+        Au.data[idx] = [1.0]
+    Au = Au.tocsc()
+
+    Av = Av.tolil()
+    for idx in v_zero_indices:
+        Av.rows[idx] = [idx]
+        Av.data[idx] = [1.0]
+    Av = Av.tocsc()
+
+    # Factorize matrices for fast repeated solves
+    print('Factorizing velocity matrices...')
+    Au_fac = spla.splu(Au)
+    Av_fac = spla.splu(Av)
+
+    # Factorize pressure Laplacian (pinning included) once
+    print('Factorizing pressure Poisson...')
+    Lp_csc = L_p.tocsc()
+    Lp_fac = spla.splu(Lp_csc)
+
+    # Initialize fields (Fortran-order shapes)
+    u = np.ones((Nx + 1, Ny), order='F') * 1.0
+    v = np.zeros((Nx, Ny + 1), order='F')
+    p = np.zeros((Nx, Ny), order='F')
+
+    # apply penalization to enforce zero inside cylinder initially
+    u = u * (1.0 - chi_u)
+    v = v * (1.0 - chi_v)
+
+    # History for AB2 convective term
+    N_u, N_v = compute_convective(u, v, Nx, Ny, dx, dy)
+    N_u_prev = N_u.copy()
+    N_v_prev = N_v.copy()
+
+    # Precompute index lists for enforcing Dirichlet in flattened vectors
+    inlet_u_flat_indices = inlet_u_indices
+    v_zero_flat_indices = list(v_zero_indices)
+
+    # Time loop
+    print('Starting time-stepping...')
+    progress_interval = max(1, nsteps // 10)
+    for step in range(1, nsteps + 1):
+        # convective term and AB2 extrapolation
+        N_u, N_v = compute_convective(u, v, Nx, Ny, dx, dy)
+        N_u_ex = 1.5 * N_u - 0.5 * N_u_prev
+        N_v_ex = 1.5 * N_v - 0.5 * N_v_prev
+
+        # RHS for tentative velocity solves
+        rhs_u = flatten(u) - dt * flatten(N_u_ex)
+        rhs_v = flatten(v) - dt * flatten(N_v_ex)
+
+        # enforce inlet Dirichlet in RHS
+        for idx in inlet_u_flat_indices:
+            rhs_u[idx] = 1.0
+        # enforce v Dirichlet rows in RHS
+        for idx in v_zero_flat_indices:
+            rhs_v[idx] = 0.0
+
+        # Solve implicit systems
+        u_star_flat = Au_fac.solve(rhs_u)
+        v_star_flat = Av_fac.solve(rhs_v)
+
+        u_star = unflatten_u(u_star_flat, Nx, Ny)
+        v_star = unflatten_v(v_star_flat, Nx, Ny)
+
+        # compute divergence of tentative velocity
+        div_u_star = divergence(u_star, v_star, Nx, Ny, dx, dy)
+        rhs_p = (1.0 / dt) * flatten(div_u_star)
+
+        # enforce pinned pressure RHS (matching pinned row in L_p)
+        rhs_p[pinned_idx] = 0.0
+
+        # solve Poisson L_p * p_corr = rhs_p
+        p_corr_flat = Lp_fac.solve(rhs_p)
+        # remove any residual mean to avoid location bias
+        p_corr_flat = p_corr_flat - np.mean(p_corr_flat)
+        p_corr = unflatten_p(p_corr_flat, Nx, Ny)
+
+        # compute pressure gradients at faces
+        dpdx = gradient_p_to_u(p_corr, Nx, Ny, dx, dy)
+        dpdy = gradient_p_to_v(p_corr, Nx, Ny, dx, dy)
+
+        # project velocities
+        u_new = u_star - dt * dpdx
+        v_new = v_star - dt * dpdy
+
+        # enforce boundary conditions explicitly
+        u_new[0, :] = 1.0
+        # free-slip (du/dy=0) at top/bottom -> copy neighbor
+        u_new[:, 0] = u_new[:, 1]
+        u_new[:, Ny - 1] = u_new[:, Ny - 2]
+        # outlet zero-gradient
+        u_new[Nx, :] = u_new[Nx - 1, :]
+        # v top/bottom Dirichlet
+        v_new[:, 0] = 0.0
+        v_new[:, Ny] = 0.0
+
+        # update fields and history
+        u = u_new.copy()
+        v = v_new.copy()
+        p = p_corr.copy()
+
+        N_u_prev = N_u.copy()
+        N_v_prev = N_v.copy()
+
+        # compute divergence residual after projection for diagnostics
+        div_res = divergence(u, v, Nx, Ny, dx, dy)
+        div_L2 = np.sqrt(np.sum(div_res**2) * dx * dy)
+
+        # progress printing every 10% of total steps
+        if (step % progress_interval) == 0 or step == nsteps:
+            perc = int(100 * step / nsteps)
+            uc = 0.5 * (u[0:Nx, :] + u[1:Nx+1, :])
+            vc = 0.5 * (v[:, 0:Ny] + v[:, 1:Ny+1])
+            KE = 0.5 * np.sum(uc**2 + vc**2) * dx * dy
+            umax = max(np.abs(u).max(), np.abs(v).max())
+            print(f'Step {step}/{nsteps} ({perc}%) t={step*dt:.3f} umax={umax:.3f} KE={KE:.5f} div_L2={div_L2:.5e}')
+
+    # After time loop, compute velocity magnitude at cell centers for plotting
+    u_center = 0.5 * (u[0:Nx, :] + u[1:Nx + 1, :])  # shape (Nx, Ny)
+    v_center = 0.5 * (v[:, 0:Ny] + v[:, 1:Ny + 1])  # shape (Nx, Ny)
+    vel_mag = np.sqrt(u_center**2 + v_center**2)
+
+    # build meshgrid for plotting (pressure cell centers) with indexing='ij'
+    Xp, Yp = np.meshgrid(x_p, y_p, indexing='ij')
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    cp = ax.contourf(Xp, Yp, vel_mag, levels=50, cmap='RdBu_r')
+    cbar = fig.colorbar(cp, ax=ax)
+    cbar.set_label('Velocity magnitude')
+    ax.set_aspect('equal')
+    ax.set_xlabel('x'); ax.set_ylabel('y')
+    ax.set_title(f'Velocity magnitude at t={T:.2f}, Re={Re:.0f}')
+
+    # mark cylinder (circle centered at 0,0 radius=0.5)
+    theta = np.linspace(0, 2 * np.pi, 200)
+    xc = 0.5 * np.cos(theta)
+    yc = 0.5 * np.sin(theta)
+    ax.plot(xc, yc, 'k', linewidth=1.0)
+
+    fig.tight_layout()
+    fig.savefig('velocity_magnitude.png', dpi=200)
+    print('Saved figure to velocity_magnitude.png')
+
+
+if __name__ == '__main__':
+    main()
+```
+****************************************

@@ -1,0 +1,410 @@
+
+****************************************
+```python
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+
+# Global viscosity (as requested)
+Re = 100.0
+visc = 1.0 / Re
+
+# ---------------------------------------------------------------------------
+# Utility: 1D Neumann 2nd derivative and 2D Kron Laplacian
+# ---------------------------------------------------------------------------
+
+def D2_1d_neumann(n, h):
+    main = -2.0 * np.ones(n)
+    off = 1.0 * np.ones(n - 1)
+    A = sp.diags([off, main, off], offsets=[-1, 0, 1], format='csc')
+    A = A.tolil()
+    if n >= 2:
+        A[0, 1] = 2.0
+        A[-1, -2] = 2.0
+    return (A.tocsc()) / (h * h)
+
+
+def laplacian_2d_neumann(nx, ny, dx, dy):
+    Dx = D2_1d_neumann(nx, dx)
+    Dy = D2_1d_neumann(ny, dy)
+    Ix = sp.eye(nx, format='csc')
+    Iy = sp.eye(ny, format='csc')
+    L = sp.kron(Iy, Dx, format='csc') + sp.kron(Dy, Ix, format='csc')
+    return L
+
+
+def enforce_dirichlet_rows(A, b, dof_idx, values):
+    A = A.tolil()
+    for k, val in zip(dof_idx, values):
+        A.rows[k] = [k]
+        A.data[k] = [1.0]
+        b[k] = val
+    return A.tocsc(), b
+
+
+# ---------------------------------------------------------------------------
+# Grid and geometry: MAC staggered grid builder
+# ---------------------------------------------------------------------------
+
+def build_mac_grid(x_left=3.0, x_right=8.0, y_top=3.0, y_bottom=3.0, Nx=120, Ny=60):
+    x_min = -x_left
+    x_max = x_right
+    y_min = -y_bottom
+    y_max = y_top
+    Lx = x_max - x_min
+    Ly = y_max - y_min
+
+    dx = Lx / Nx
+    dy = Ly / Ny
+
+    # pressure at cell centers (Nx, Ny)
+    xc = np.linspace(x_min + 0.5 * dx, x_max - 0.5 * dx, Nx)
+    yc = np.linspace(y_min + 0.5 * dy, y_max - 0.5 * dy, Ny)
+    Xc, Yc = np.meshgrid(xc, yc, indexing='ij')
+
+    # u at vertical faces (Nx+1, Ny)
+    xu = np.linspace(x_min, x_max, Nx + 1)
+    yu = np.linspace(y_min + 0.5 * dy, y_max - 0.5 * dy, Ny)
+    Xu, Yu = np.meshgrid(xu, yu, indexing='ij')
+
+    # v at horizontal faces (Nx, Ny+1)
+    xv = np.linspace(x_min + 0.5 * dx, x_max - 0.5 * dx, Nx)
+    yv = np.linspace(y_min, y_max, Ny + 1)
+    Xv, Yv = np.meshgrid(xv, yv, indexing='ij')
+
+    return dict(
+        x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max,
+        Lx=Lx, Ly=Ly, dx=dx, dy=dy,
+        Nx=Nx, Ny=Ny,
+        Xc=Xc, Yc=Yc, Xu=Xu, Yu=Yu, Xv=Xv, Yv=Yv,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Penalization masks (chi) and alpha = chi/eta flattened in Fortran order
+# ---------------------------------------------------------------------------
+
+def build_penalization_masks(grid, radius=0.5, eta=1e-3):
+    Xu, Yu = grid['Xu'], grid['Yu']
+    Xv, Yv = grid['Xv'], grid['Yv']
+    Xc, Yc = grid['Xc'], grid['Yc']
+
+    chi_u = (Xu ** 2 + Yu ** 2) <= (radius ** 2)
+    chi_v = (Xv ** 2 + Yv ** 2) <= (radius ** 2)
+    chi_c = (Xc ** 2 + Yc ** 2) <= (radius ** 2)
+
+    alpha_u = (chi_u.astype(float) / eta).ravel(order='F')
+    alpha_v = (chi_v.astype(float) / eta).ravel(order='F')
+    chi_c = chi_c.astype(float)
+
+    return alpha_u, alpha_v, chi_c
+
+
+# ---------------------------------------------------------------------------
+# Vectorized interpolation between staggered grids (no Python loops)
+# ---------------------------------------------------------------------------
+
+def interp_v_to_u(v, grid):
+    # v: (Nx, Ny+1) -> v_on_u: (Nx+1, Ny)
+    Nx, Ny = grid['Nx'], grid['Ny']
+    # average in y to get v at vertical-center y-locations (Ny)
+    v_mid = 0.5 * (v[:, :-1] + v[:, 1:])  # shape (Nx, Ny)
+    v_on_u = np.empty((Nx + 1, Ny), dtype=v.dtype)
+    # interior u-faces (between adjacent v_mid in x)
+    v_on_u[1:-1, :] = 0.5 * (v_mid[:-1, :] + v_mid[1:, :])
+    # boundary faces: copy nearest
+    v_on_u[0, :] = v_mid[0, :]
+    v_on_u[-1, :] = v_mid[-1, :]
+    return v_on_u
+
+
+def interp_u_to_v(u, grid):
+    # u: (Nx+1, Ny) -> u_on_v: (Nx, Ny+1)
+    Nx, Ny = grid['Nx'], grid['Ny']
+    # average in x to get u at x-centered (cell) locations (Nx)
+    u_mid = 0.5 * (u[:-1, :] + u[1:, :])  # shape (Nx, Ny)
+    u_on_v = np.empty((Nx, Ny + 1), dtype=u.dtype)
+    # interior v-faces (between adjacent u_mid in y)
+    u_on_v[:, 1:-1] = 0.5 * (u_mid[:, :-1] + u_mid[:, 1:])
+    # boundaries: copy nearest
+    u_on_v[:, 0] = u_mid[:, 0]
+    u_on_v[:, -1] = u_mid[:, -1]
+    return u_on_v
+
+
+# ---------------------------------------------------------------------------
+# Convective terms (vectorized) on MAC grid
+# ---------------------------------------------------------------------------
+
+def convective_terms(u, v, grid):
+    Nx, Ny = grid['Nx'], grid['Ny']
+    dx, dy = grid['dx'], grid['dy']
+
+    # u: (Nx+1, Ny)
+    dudx = np.zeros_like(u)
+    dudx[1:-1, :] = (u[2:, :] - u[:-2, :]) / (2.0 * dx)
+    dudx[0, :] = (u[1, :] - u[0, :]) / dx
+    dudx[-1, :] = (u[-1, :] - u[-2, :]) / dx
+
+    dudy = np.zeros_like(u)
+    dudy[:, 1:-1] = (u[:, 2:] - u[:, :-2]) / (2.0 * dy)
+    dudy[:, 0] = (u[:, 1] - u[:, 0]) / dy
+    dudy[:, -1] = (u[:, -1] - u[:, -2]) / dy
+
+    v_on_u = interp_v_to_u(v, grid)
+    conv_u = u * dudx + v_on_u * dudy
+
+    # v: (Nx, Ny+1)
+    dvdx = np.zeros_like(v)
+    dvdx[1:-1, :] = (v[2:, :] - v[:-2, :]) / (2.0 * dx)
+    dvdx[0, :] = (v[1, :] - v[0, :]) / dx
+    dvdx[-1, :] = (v[-1, :] - v[-2, :]) / dx
+
+    dvdy = np.zeros_like(v)
+    dvdy[:, 1:-1] = (v[:, 2:] - v[:, :-2]) / (2.0 * dy)
+    dvdy[:, 0] = (v[:, 1] - v[:, 0]) / dy
+    dvdy[:, -1] = (v[:, -1] - v[:, -2]) / dy
+
+    u_on_v = interp_u_to_v(u, grid)
+    conv_v = u_on_v * dvdx + v * dvdy
+
+    return conv_u, conv_v
+
+
+# ---------------------------------------------------------------------------
+# Divergence and pressure gradient
+# ---------------------------------------------------------------------------
+
+def divergence(u, v, grid):
+    Nx, Ny = grid['Nx'], grid['Ny']
+    dx, dy = grid['dx'], grid['dy']
+    # divergence at cell centers: (u_{i+1,j} - u_{i,j})/dx + (v_{i,j+1} - v_{i,j})/dy
+    div = (u[1:, :] - u[:-1, :]) / dx + (v[:, 1:] - v[:, :-1]) / dy
+    return div
+
+
+def gradient_p_to_u_v(p, grid):
+    Nx, Ny = grid['Nx'], grid['Ny']
+    dx, dy = grid['dx'], grid['dy']
+    dpdx = np.zeros((Nx + 1, Ny))
+    dpdx[1:-1, :] = (p[1:, :] - p[:-1, :]) / dx
+    dpdx[0, :] = (p[0, :] - p[0, :]) / dx
+    dpdx[-1, :] = (p[-1, :] - p[-1, :]) / dx
+
+    dpdy = np.zeros((Nx, Ny + 1))
+    dpdy[:, 1:-1] = (p[:, 1:] - p[:, :-1]) / dy
+    dpdy[:, 0] = (p[:, 0] - p[:, 0]) / dy
+    dpdy[:, -1] = (p[:, -1] - p[:, -1]) / dy
+    return dpdx, dpdy
+
+
+# ---------------------------------------------------------------------------
+# Build velocity operators (CN for viscous + implicit penalization)
+# ---------------------------------------------------------------------------
+
+def build_velocity_operators(grid, dt, alpha_u, alpha_v):
+    Nx, Ny = grid['Nx'], grid['Ny']
+    dx, dy = grid['dx'], grid['dy']
+    nu = (Nx + 1) * Ny
+    nv = Nx * (Ny + 1)
+
+    Lu = laplacian_2d_neumann(Nx + 1, Ny, dx, dy)
+    Lv = laplacian_2d_neumann(Nx, Ny + 1, dx, dy)
+
+    Iu = sp.eye(nu, format='csc')
+    Iv = sp.eye(nv, format='csc')
+
+    Au = (Iu - 0.5 * dt * visc * Lu).tocsc()
+    Av = (Iv - 0.5 * dt * visc * Lv).tocsc()
+
+    # penalization implicitly added to diagonal (dt * alpha)
+    Au = Au + sp.diags(dt * alpha_u, 0, format='csc')
+    Av = Av + sp.diags(dt * alpha_v, 0, format='csc')
+
+    Bu = (Iu + 0.5 * dt * visc * Lu).tocsc()
+    Bv = (Iv + 0.5 * dt * visc * Lv).tocsc()
+
+    return Au, Av, Bu, Bv
+
+
+# ---------------------------------------------------------------------------
+# Main solver
+# ---------------------------------------------------------------------------
+
+def run_simulation():
+    Nx = 120
+    Ny = 60
+    grid = build_mac_grid(Nx=Nx, Ny=Ny)
+    dx, dy = grid['dx'], grid['dy']
+
+    U_in = 1.0
+    CFL = 0.4
+    dt = CFL * min(dx, dy) / max(1e-12, U_in)
+    t_final = 20.0
+    Nt = int(np.ceil(t_final / dt))
+    dt = t_final / Nt
+
+    print(f"Grid: Nx={Nx}, Ny={Ny}, dx={dx:.4f}, dy={dy:.4f}")
+    print(f"Time steps: Nt={Nt}, dt={dt:.5f}, final t={t_final}")
+
+    # penalization parameter (user-tunable). Default chosen as a robust compromise.
+    eta = 1e-3
+    alpha_u, alpha_v, chi_c = build_penalization_masks(grid, radius=0.5, eta=eta)
+
+    nu = (Nx + 1) * Ny
+    nv = Nx * (Ny + 1)
+    np_cells = Nx * Ny
+
+    # initial fields
+    u = U_in * np.ones((Nx + 1, Ny), dtype=float)
+    v = np.zeros((Nx, Ny + 1), dtype=float)
+    p = np.zeros((Nx, Ny), dtype=float)
+
+    # enforce inlet u face and v BCs
+    u[0, :] = U_in
+    v[0, :] = 0.0
+
+    # build operators once
+    Au, Av, Bu, Bv = build_velocity_operators(grid, dt, alpha_u, alpha_v)
+
+    # indexing helpers (Fortran order)
+    u_shape = (Nx + 1, Ny)
+    v_shape = (Nx, Ny + 1)
+
+    def idx_u(i, j):
+        return np.ravel_multi_index((i, j), u_shape, order='F')
+
+    def idx_v(i, j):
+        return np.ravel_multi_index((i, j), v_shape, order='F')
+
+    # Dirichlet DOFs
+    dof_u_dir = [idx_u(0, j) for j in range(Ny)]
+    val_u_dir = [U_in] * Ny
+    dof_v_dir = [idx_v(i, 0) for i in range(Nx)] + [idx_v(i, Ny) for i in range(Nx)]
+    val_v_dir = [0.0] * (2 * Nx)
+
+    # Enforce same Dirichlet rows on both LHS (Au,Av) and RHS (Bu,Bv)
+    Au, _ = enforce_dirichlet_rows(Au, np.zeros(nu), dof_u_dir, val_u_dir)
+    Bu, _ = enforce_dirichlet_rows(Bu, np.zeros(nu), dof_u_dir, val_u_dir)
+    Av, _ = enforce_dirichlet_rows(Av, np.zeros(nv), dof_v_dir, val_v_dir)
+    Bv, _ = enforce_dirichlet_rows(Bv, np.zeros(nv), dof_v_dir, val_v_dir)
+
+    # factorize LHS matrices for speed
+    Au_fact = spla.splu(Au)
+    Av_fact = spla.splu(Av)
+
+    # Poisson operator for pressure with Neumann; fix one pressure to remove nullspace
+    Lp = laplacian_2d_neumann(Nx, Ny, dx, dy).tocsc()
+    p_fix_idx = 0
+    Lp_mod, _ = enforce_dirichlet_rows(Lp, np.zeros(np_cells), [p_fix_idx], [0.0])
+    Lp_fact = spla.splu(Lp_mod)
+
+    # initial convective terms (first-order)
+    conv_u, conv_v = convective_terms(u, v, grid)
+    conv_u_prev = conv_u.copy()
+    conv_v_prev = conv_v.copy()
+
+    # flattening helpers using Fortran order
+    def vecU(arr):
+        return arr.ravel(order='F')
+
+    def reshapeU(vec):
+        return vec.reshape((Nx + 1, Ny), order='F')
+
+    def vecV(arr):
+        return arr.ravel(order='F')
+
+    def reshapeV(vec):
+        return vec.reshape((Nx, Ny + 1), order='F')
+
+    # quick correctness checks (shapes and mass-conservation of trivial field)
+    # If u=U_in, v=0 then divergence should be ~0
+    div_check = divergence(u, v, grid)
+    assert div_check.shape == (Nx, Ny)
+
+    t = 0.0
+    report_every = max(1, Nt // 10)
+
+    for step in range(1, Nt + 1):
+        # convective terms and AB2 extrapolation
+        conv_u, conv_v = convective_terms(u, v, grid)
+        conv_u_ex = 1.5 * conv_u - 0.5 * conv_u_prev
+        conv_v_ex = 1.5 * conv_v - 0.5 * conv_v_prev
+
+        rhs_u = Bu.dot(vecU(u)) - dt * vecU(conv_u_ex)
+        rhs_v = Bv.dot(vecV(v)) - dt * vecV(conv_v_ex)
+
+        # Solve tentative velocities
+        u_tent_vec = Au_fact.solve(rhs_u)
+        v_tent_vec = Av_fact.solve(rhs_v)
+
+        u_tent = reshapeU(u_tent_vec)
+        v_tent = reshapeV(v_tent_vec)
+
+        # Reapply strong Dirichlet BCs (just to be safe)
+        u_tent[0, :] = U_in
+        v_tent[:, 0] = 0.0
+        v_tent[:, -1] = 0.0
+
+        # Pressure Poisson RHS
+        div_tent = divergence(u_tent, v_tent, grid)
+        rhs_p = (1.0 / dt) * vecU(div_tent)
+        rhs_p[p_fix_idx] = 0.0
+
+        p_vec = Lp_fact.solve(rhs_p)
+        p = p_vec.reshape((Nx, Ny), order='F')
+
+        # Projection
+        dpdx, dpdy = gradient_p_to_u_v(p, grid)
+        u = u_tent - dt * dpdx
+        v = v_tent - dt * dpdy
+
+        # Reapply BCs again
+        u[0, :] = U_in
+        v[:, 0] = 0.0
+        v[:, -1] = 0.0
+
+        # Update convective history
+        conv_u_prev = conv_u
+        conv_v_prev = conv_v
+
+        t += dt
+        if (step % report_every == 0) or (step == Nt):
+            # approximate cell-centered velocities and diagnostics
+            uc = 0.5 * (u[:-1, :] + u[1:, :])
+            vc = 0.5 * (v[:, :-1] + v[:, 1:])
+            velmag = np.sqrt(uc ** 2 + vc ** 2)
+            # diagnostic inside cylinder using chi_c mask
+            inside_max = velmag[chi_c.astype(bool)].max() if chi_c.any() else 0.0
+            mean_vel_center = velmag.mean()
+            print(f"Step {step}/{Nt}, t={t:.3f}, mean_vel={mean_vel_center:.4f}, max_inside_cyl={inside_max:.6f}")
+
+    # Final postprocessing: velocity magnitude at cell centers
+    uc = 0.5 * (u[:-1, :] + u[1:, :])
+    vc = 0.5 * (v[:, :-1] + v[:, 1:])
+    velmag = np.sqrt(uc ** 2 + vc ** 2)
+
+    Xc = grid['Xc']
+    Yc = grid['Yc']
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    cf = ax.contourf(Xc, Yc, velmag, levels=60, cmap='RdBu_r')
+    cbar = fig.colorbar(cf, ax=ax)
+    cbar.set_label('Velocity magnitude')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_title(f'Velocity magnitude at t={t_final:.2f}')
+
+    cyl = Circle((0.0, 0.0), 0.5, color='k', fill=False, linewidth=1.5)
+    ax.add_patch(cyl)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    fig.savefig('velocity_magnitude.png', dpi=150)
+    print('Saved final velocity magnitude plot to velocity_magnitude.png')
+
+
+if __name__ == '__main__':
+    run_simulation()
+```
+****************************************
