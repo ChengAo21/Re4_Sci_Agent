@@ -6,3 +6,7 @@ matplotlib>=3.8,<4
 pandas>=2.1,<4
 pillow>=10,<13
 scikit-learn>=1.4,<2
+
+# Live API interface; generated-code execution still requires explicit enablement.
+openai>=1.55,<4
+pydantic>=2.8,<3
