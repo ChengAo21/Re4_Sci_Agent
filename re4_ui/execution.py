@@ -21,6 +21,9 @@ import zipfile
 from .archive import ROOT, redact
 
 MAX_LOG = 160_000
+EXECUTION_TIMEOUT_OPTIONS = (15, 30, 60, 120, 180, 300, 600, 1200, 1800)
+DEFAULT_EXECUTION_TIMEOUT = 600
+MAX_EXECUTION_TIMEOUT = max(EXECUTION_TIMEOUT_OPTIONS)
 
 
 @dataclass
@@ -80,12 +83,12 @@ def clean_environment(workspace: Path) -> dict[str, str]:
     return env
 
 
-def execute_script(code: str, timeout: int = 60, *, generated: bool = False,
+def execute_script(code: str, timeout: int = DEFAULT_EXECUTION_TIMEOUT, *, generated: bool = False,
                    on_progress: Callable[[str, str], None] | None = None) -> ExecutionResult:
     if generated and not live_enabled():
         raise PermissionError("Enable RE4_ENABLE_LIVE_EXECUTION on a controlled host to run newly generated code.")
     validate_code(code)
-    timeout = max(5, min(int(timeout), 1800))
+    timeout = max(5, min(int(timeout), MAX_EXECUTION_TIMEOUT))
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="re4-lab-") as folder:
         work = Path(folder)
@@ -95,14 +98,14 @@ def execute_script(code: str, timeout: int = 60, *, generated: bool = False,
             if source.is_file():
                 shutil.copy2(source, work / name)
         # Scientific limits are best-effort on Unix; the wall-clock limit also applies on Windows.
-        launcher = """import os, runpy
+        launcher = f"""import os, runpy
 try:
     import resource
-    resource.setrlimit(resource.RLIMIT_CPU, (1800, 1801))
+    resource.setrlimit(resource.RLIMIT_CPU, ({timeout}, {timeout + 1}))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64*1024*1024, 64*1024*1024))
 except (ImportError, ValueError, OSError):
     pass
-import matplotlib
+""" + """import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path

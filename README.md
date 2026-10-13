@@ -7,11 +7,12 @@
 **From a scientific question to executable code — with the numerical decisions in view.**
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](docs/streamlit.md)
+[![Live demo](https://img.shields.io/badge/Live_demo-Open_app-FF4B4B?logo=streamlit&logoColor=white)](https://re4-agent.streamlit.app/)
 [![Streamlit](https://img.shields.io/badge/Interface-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](docs/streamlit.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-14b8a6.svg)](LICENSE)
 [![Paper](https://img.shields.io/badge/AI%26PDE%202026-Paper-6253d9.svg)](https://openreview.net/forum?id=PMdr3fQpBE)
 
-[Explore the results](#results-from-the-archived-code) · [Run the app](#try-the-streamlit-app) · [Deploy](docs/deployment.md) · [Reproduce](docs/results_provenance.md) · [Cite](#citation)
+[Live demo](https://re4-agent.streamlit.app/) · [Explore the results](#results-from-the-archived-code) · [Run locally](#try-the-streamlit-app) · [Deploy](docs/deployment.md) · [Reproduce](docs/results_provenance.md) · [Cite](#citation)
 
 </div>
 
@@ -38,6 +39,8 @@ These are **selected regenerated examples**, not aggregate benchmark measurement
 
 ## Try the Streamlit app
 
+Open the [hosted Streamlit app](https://re4-agent.streamlit.app/) to explore the workspace, or follow the local setup below.
+
 The default app works **without an API key**.
 
 | Workspace | What you can inspect or run |
@@ -63,7 +66,7 @@ python -m streamlit run streamlit_app.py
 
 After starting the app locally, open **http://localhost:8501** in your browser. See the [app guide](docs/streamlit.md) for a suggested walkthrough and optional live-model setup.
 
-For public access, deploy the app to Streamlit Community Cloud or another Python hosting service. The [cloud deployment guide](docs/deployment.md) covers Streamlit Community Cloud and Docker-based deployment; a [Dockerfile](Dockerfile) is included. Hosting requires an account on the chosen platform.
+To deploy your own instance, use Streamlit Community Cloud or another Python hosting service. The [cloud deployment guide](docs/deployment.md) covers Streamlit Community Cloud and Docker-based deployment; a [Dockerfile](Dockerfile) is included. Hosting requires an account on the chosen platform.
 
 ## Repository map
 

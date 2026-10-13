@@ -65,6 +65,8 @@ The UI presents the same four-stage, three-role workflow. The original CLI remai
 
 ## Execution and numerical limits
 
+The Replay, archived-solver and Live views use the same Python execution limits: 15, 30, 60, 120, 180, 300, 600, 1200 and 1800 seconds. The default is 600 seconds; the maximum is 1800 seconds (30 minutes) per Python execution. Choose a limit before starting a new run. Changing the selection does not resume or rerun an earlier execution. These options and limits are defined together in `re4_ui/execution.py`; the independent model API timeout is configured in `re4_ui/live.py`.
+
 Archived programs are rerun in separate working directories with a timeout. Subprocess separation is not an operating-system sandbox: use a private deployment for new model-generated code. Keep live execution disabled on a public demonstration host. Gallery and Replay remain available without enabling it.
 
 The result gallery contains selected examples. It does not recalculate the manuscript's aggregate success rates or errors, and it does not claim that each archived implementation is a validated reference solver. Consult [the provenance and numerical notes](results_provenance.md) before interpreting a result.

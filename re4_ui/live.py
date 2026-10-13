@@ -13,7 +13,7 @@ import time
 from typing import Any, Callable
 
 from .archive import ROOT, python_blocks, redact
-from .execution import execute_script, live_enabled, ExecutionResult
+from .execution import DEFAULT_EXECUTION_TIMEOUT, execute_script, live_enabled, ExecutionResult
 
 
 @dataclass
@@ -24,7 +24,7 @@ class LiveSettings:
     programmer_model: str
     reviewer_model: str
     revisions: int = 2
-    execution_timeout: int = 60
+    execution_timeout: int = DEFAULT_EXECUTION_TIMEOUT
     max_tokens: int = 10000
     image_review: bool = False
 

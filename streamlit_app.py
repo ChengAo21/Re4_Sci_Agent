@@ -11,7 +11,14 @@ import re
 import streamlit as st
 
 from re4_ui.archive import ROOT, archive_choices, code_choices, read_archive, read_trusted_code, redact, solution_plans
-from re4_ui.execution import ExecutionResult, execute_script, live_enabled
+from re4_ui.execution import (
+    DEFAULT_EXECUTION_TIMEOUT,
+    EXECUTION_TIMEOUT_OPTIONS,
+    MAX_EXECUTION_TIMEOUT,
+    ExecutionResult,
+    execute_script,
+    live_enabled,
+)
 
 st.set_page_config(page_title="Re4 Lab · Scientific Computing Agent", page_icon="✳", layout="wide",
                    initial_sidebar_state="collapsed")
@@ -298,8 +305,10 @@ def replay() -> None:
                     st.markdown(attempt.image_review)
         st.markdown("### Re-run this archived attempt")
         st.caption("Runs the saved script in a fresh workspace with a time limit. Open Matplotlib figures are automatically exported. The historical review above is not a review of this new execution.")
-        timeout = st.select_slider("Execution limit", options=[15, 30, 60, 120, 180], value=60, key="replay_timeout")
-        run_key = f"{archive.path.as_posix()}:{selected}"
+        timeout = st.select_slider("Execution limit", options=EXECUTION_TIMEOUT_OPTIONS,
+                                   value=DEFAULT_EXECUTION_TIMEOUT, key="replay_timeout")
+        st.caption(f"Selected limit: {timeout} seconds · maximum: {MAX_EXECUTION_TIMEOUT} seconds. Start a new run to apply this limit.")
+        run_key = f"{archive.path.as_posix()}:{selected}:{timeout}"
         if st.button("Run archived Python", type="primary", key="replay_run"):
             try:
                 with st.status("Executing archived Python…", expanded=True) as status:
@@ -354,7 +363,10 @@ def live_lab() -> None:
             with st.expander("Source Python & provenance"):
                 st.code(path.relative_to(ROOT).as_posix(), language="text", wrap_lines=True)
                 st.code(code, language="python", line_numbers=True)
-            timeout = st.select_slider("Wall-clock limit", options=[15, 30, 60, 120, 180], value=60)
+            timeout = st.select_slider("Wall-clock limit", options=EXECUTION_TIMEOUT_OPTIONS,
+                                       value=DEFAULT_EXECUTION_TIMEOUT, key="trusted_timeout")
+            st.caption(f"Selected limit: {timeout} seconds · maximum: {MAX_EXECUTION_TIMEOUT} seconds. Start a new run to apply this limit.")
+            run_key = f"{choice}:{timeout}"
             if st.button("Execute selected solver", type="primary"):
                 try:
                     with st.status("Running the selected archived solver…", expanded=True) as status:
@@ -362,12 +374,12 @@ def live_lab() -> None:
                         console = st.empty()
                         def update_console(out: str, err: str) -> None:
                             console.code(out or err or "Python process started…", language="text", wrap_lines=True)
-                        st.session_state["trusted_result"] = (choice, execute_script(code, timeout, on_progress=update_console))
+                        st.session_state["trusted_result"] = (run_key, execute_script(code, timeout, on_progress=update_console))
                         status.update(label="Archived solver finished", state="complete")
                 except (ValueError, SyntaxError, OSError) as error:
                     st.error(f"Execution could not start: {redact(str(error))}")
             saved = st.session_state.get("trusted_result")
-            if saved and saved[0] == choice:
+            if saved and saved[0] == run_key:
                 show_execution(saved[1], "trusted")
         else:
             st.info("No archived final-stage code was found.")
@@ -392,7 +404,10 @@ def live_lab() -> None:
             rev = c3.text_input("Reviewer model", value=os.getenv("RE4_REVIEWER_MODEL", model_default))
             a, b, c = st.columns(3)
             revisions = a.selectbox("Maximum revisions", [0, 1, 2], index=2)
-            timeout = b.selectbox("Python timeout (seconds)",[30, 60, 120, 180, 300, 600, 1200, 1800],index=5,)
+            timeout = b.selectbox("Python timeout (seconds)", EXECUTION_TIMEOUT_OPTIONS,
+                                  index=EXECUTION_TIMEOUT_OPTIONS.index(DEFAULT_EXECUTION_TIMEOUT),
+                                  key="live_timeout")
+            b.caption(f"Maximum: {MAX_EXECUTION_TIMEOUT} seconds per Python execution.")
             token_limit = c.selectbox("Output-token limit per call", [4000, 8000, 12000, 16000], index=1)
             vision = st.checkbox("Enable image review (requires a vision-capable Reviewer model)")
             approved = st.checkbox("I authorize calls to my API provider and execution of the generated Python on this controlled host. Provider charges may apply.")
