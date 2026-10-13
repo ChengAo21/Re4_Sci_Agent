@@ -85,7 +85,7 @@ def execute_script(code: str, timeout: int = 60, *, generated: bool = False,
     if generated and not live_enabled():
         raise PermissionError("Enable RE4_ENABLE_LIVE_EXECUTION on a controlled host to run newly generated code.")
     validate_code(code)
-    timeout = max(5, min(int(timeout), 180))
+    timeout = max(5, min(int(timeout), 1800))
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="re4-lab-") as folder:
         work = Path(folder)
@@ -98,7 +98,7 @@ def execute_script(code: str, timeout: int = 60, *, generated: bool = False,
         launcher = """import os, runpy
 try:
     import resource
-    resource.setrlimit(resource.RLIMIT_CPU, (180, 181))
+    resource.setrlimit(resource.RLIMIT_CPU, (1800, 1801))
     resource.setrlimit(resource.RLIMIT_FSIZE, (64*1024*1024, 64*1024*1024))
 except (ImportError, ValueError, OSError):
     pass

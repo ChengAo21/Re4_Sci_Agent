@@ -392,7 +392,7 @@ def live_lab() -> None:
             rev = c3.text_input("Reviewer model", value=os.getenv("RE4_REVIEWER_MODEL", model_default))
             a, b, c = st.columns(3)
             revisions = a.selectbox("Maximum revisions", [0, 1, 2], index=2)
-            timeout = b.selectbox("Python timeout (seconds)", [30, 60, 120, 180], index=1)
+            timeout = b.selectbox("Python timeout (seconds)",[30, 60, 120, 180, 300, 600, 1200, 1800],index=5,)
             token_limit = c.selectbox("Output-token limit per call", [4000, 8000, 12000, 16000], index=1)
             vision = st.checkbox("Enable image review (requires a vision-capable Reviewer model)")
             approved = st.checkbox("I authorize calls to my API provider and execution of the generated Python on this controlled host. Provider charges may apply.")
