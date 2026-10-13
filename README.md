@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="assets/re4_hero.svg" alt="Re4 — Scientific Computing Agent with Rewriting, Resolution, Review and Revision" width="100%">
+<h1>Re4: Scientific Computing Agent</h1>
+
+<img src="schematic_re4.png" alt="Re4 framework: Consultant, Programmer, and Reviewer with an iterative review and revision loop" width="100%">
 
 **From a scientific question to executable code — with the numerical decisions in view.**
 
@@ -13,9 +15,9 @@
 
 </div>
 
-Re4 combines three LLM roles — **Consultant, Programmer, and Reviewer** — in four stages: **Rewriting, Resolution, Review, and Revision**. The framework develops scientific computing solutions through code execution and diagnostic feedback. This repository includes the agent implementation, archived generated programs and interactions, and an interactive Streamlit workspace for inspecting their development and results.
+Re4 combines three LLM roles — **Consultant, Programmer, and Reviewer** — in four stages. In **Rewriting**, the Consultant expands the problem context and proposes solution plans. During **Resolution**, the Programmer selects an approach, generates Python code, and executes it. **Review** examines the implementation and runtime results, optionally including figures; **Revision** uses the reviewer's feedback to update and rerun the code. Review and revision continue until acceptance or the configured iteration limit.
 
-The focus is on the choices and difficulties revealed during solver development: discretization, stability, boundary conditions, array indexing, and consistency between coupled numerical steps. The examples use established benchmark problems; they do not demonstrate the discovery of new numerical methods.
+This repository includes the agent implementation, archived generated programs and interactions, and an interactive Streamlit workspace for inspecting their development and results. The focus is on the choices and difficulties revealed during solver development: discretization, stability, boundary conditions, array indexing, and consistency between coupled numerical steps. The examples use established benchmark problems; they do not demonstrate the discovery of new numerical methods.
 
 ## Results from the archived code
 
@@ -59,31 +61,9 @@ python -m pip install -r requirements.txt
 python -m streamlit run streamlit_app.py
 ```
 
-The local app opens at **http://localhost:8501**. See the [app guide](docs/streamlit.md) for a suggested walkthrough and optional live-model setup. A [Dockerfile and cloud deployment guide](docs/deployment.md) are included; deployment requires an account on the chosen host.
+After starting the app locally, open **http://localhost:8501** in your browser. See the [app guide](docs/streamlit.md) for a suggested walkthrough and optional live-model setup.
 
-## Four stages, three roles
-
-```mermaid
-flowchart LR
-    Q[Scientific problem] --> C["1 · Rewriting<br/>Consultant"]
-    C --> P["2 · Resolution<br/>Programmer + Python"]
-    P --> R["3 · Review<br/>Reviewer"]
-    R -->|Revise| V["4 · Revision<br/>Programmer + Python"]
-    V --> R
-    R -->|Accept| O[Code and execution results]
-```
-
-- **Rewriting** expands the problem context and proposes solution plans.
-- **Resolution** selects an approach, generates Python code, and executes it.
-- **Review** examines the implementation and runtime evidence, optionally including figures.
-- **Revision** updates the implementation using diagnostic feedback and executes it again.
-
-<details>
-<summary><strong>View the original framework schematic</strong></summary>
-
-![Re4 framework schematic](schematic_re4.png)
-
-</details>
+For public access, deploy the app to Streamlit Community Cloud or another Python hosting service. The [cloud deployment guide](docs/deployment.md) covers Streamlit Community Cloud and Docker-based deployment; a [Dockerfile](Dockerfile) is included. Hosting requires an account on the chosen platform.
 
 ## Repository map
 
@@ -107,6 +87,10 @@ python tools/build_showcase.py
 ```
 
 The original agent entry point remains `src/pycodes_ver/main.py`. It uses LangGraph, Pydantic response models, an OpenAI-compatible client, and the problem definitions in `problems.py`. Its optional dependencies are listed in `requirements-live.txt`; the [app guide](docs/streamlit.md) explains configuration and how the Streamlit view relates to the original implementation.
+
+## Acknowledgements
+
+The Streamlit interface, repository documentation, and visualization tooling were developed with assistance from OpenAI Codex.
 
 ## Citation
 
