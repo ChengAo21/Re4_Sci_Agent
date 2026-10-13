@@ -1,34 +1,118 @@
-# Re4-Scientific-Computing-Agent
-### Rewriting · Resolution · Review · Revision
+<div align="center">
 
-![schematic](schematic_re4.png)
+<img src="assets/re4_hero.svg" alt="Re4 — Scientific Computing Agent with Rewriting, Resolution, Review and Revision" width="100%">
 
-The proposed agent incorporates a **"Rewriting-Resolution-Review-Revision"** logical chain via three reasoning LLMs (functioning as the Consultant, Reviewer, and Programmer) to solve complex scientific computing problems in a collaborative and interactive manner.
+**From a scientific question to executable code — with the numerical decisions in view.**
 
-## 🚀 Key Features & Roadmap
-- **LangGraph Orchestra**: Orchestrates multi-task, multi-step agent workflows, ensuring scalability and maintainability.
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](docs/streamlit.md)
+[![Streamlit](https://img.shields.io/badge/Interface-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](docs/streamlit.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-14b8a6.svg)](LICENSE)
+[![Paper](https://img.shields.io/badge/AI%26PDE%202026-Paper-6253d9.svg)](https://openreview.net/forum?id=PMdr3fQpBE)
 
-- **Structured Output**: Generates standardized, parsable formats (via Pydantic) to ensure consistency and reusability of intermediate results.
+[Explore the results](#results-from-the-archived-code) · [Run the app](#try-the-streamlit-app) · [Deploy](docs/deployment.md) · [Reproduce](docs/results_provenance.md) · [Cite](#citation)
 
-- **Context Management**: Utilizes a shared state graph to manage solution plans, code history, and review feedback across multi-turn agent interactions, improving the coherence of interactions.
+</div>
 
-- **Multimodal Review**: Enables the Reviewer agent to validate not just code logic but also visual outputs (plots, contours), achieving comprehensive quality control.
+Re4 combines three LLM roles — **Consultant, Programmer, and Reviewer** — in four stages: **Rewriting, Resolution, Review, and Revision**. The framework develops scientific computing solutions through code execution and diagnostic feedback. This repository includes the agent implementation, archived generated programs and interactions, and an interactive Streamlit workspace for inspecting their development and results.
 
-- [ ] **Interactive Frontend**: Develop a Streamlit-based UI for easier user interaction (In Progress).
+The focus is on the choices and difficulties revealed during solver development: discretization, stability, boundary conditions, array indexing, and consistency between coupled numerical steps. The examples use established benchmark problems; they do not demonstrate the discovery of new numerical methods.
 
-## 📂 Project Structure
+## Results from the archived code
+
+<div align="center">
+<img src="assets/results/cylinder.gif" alt="Cylinder-flow temporal sequence regenerated from an archived Re4 program" width="100%">
+
+**Cylinder flow · Re = 100**  
+Temporal snapshots regenerated from an archived final-revision program.
+</div>
+
+| Flow benchmarks | Transport and elliptic benchmarks | Algebra and dimensional analysis |
+|:---:|:---:|:---:|
+| **Sod shock tube**<br><img src="assets/results/sod.png" alt="Sod shock-tube final result" width="320"> | **Viscous Burgers equation**<br><img src="assets/results/burgers.png" alt="Burgers equation final result" width="320"> | **Hilbert system**<br><img src="assets/results/hilbert.png" alt="Hilbert system final result" width="320"> |
+| **Lid-driven cavity**<br><img src="assets/results/cavity.png" alt="Lid-driven cavity final result" width="320"> | **Poisson equation**<br><img src="assets/results/poisson.png" alt="Poisson equation final result" width="320"> | **Keyhole scaling**<br><img src="assets/results/keyhole.png" alt="Keyhole scaling final result" width="320"> |
+| **Unsteady Navier–Stokes**<br><img src="assets/results/unsteady_ns.png" alt="Unsteady Navier–Stokes final result" width="320"> | **Helmholtz equation**<br><img src="assets/results/helmholtz.png" alt="Helmholtz equation final result" width="320"> | **Rayleigh scaling**<br><img src="assets/results/rayleigh.png" alt="Rayleigh scaling final result" width="320"> |
+
+These are **selected regenerated examples**, not aggregate benchmark measurements. Each image is linked to its archived source and execution details in the [result provenance](docs/results_provenance.md). The Streamlit gallery exposes the corresponding code and available outputs; the replay view shows archived attempts and reviewer feedback. An executable program or a plausible plot alone does not establish numerical correctness.
+
+## Try the Streamlit app
+
+The default app works **without an API key**.
+
+| Workspace | What you can inspect or run |
+|---|---|
+| **Gallery** | Numerical result cards, cylinder animation, source programs, and provenance. |
+| **Replay** | Archived problem statements, Consultant plans, Programmer code, runtime output, and Reviewer feedback, presented in sequence. Replay makes no new LLM calls. |
+| **Run lab** | Execute selected archived programs and inspect their logs and plots. Optional live mode connects the three roles to an OpenAI-compatible API. |
+
+**Windows** — from this directory:
+
+```powershell
+.\start_streamlit.ps1
 ```
+
+**macOS / Linux**, or manual setup:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m streamlit run streamlit_app.py
+```
+
+The local app opens at **http://localhost:8501**. See the [app guide](docs/streamlit.md) for a suggested walkthrough and optional live-model setup. A [Dockerfile and cloud deployment guide](docs/deployment.md) are included; deployment requires an account on the chosen host.
+
+## Four stages, three roles
+
+```mermaid
+flowchart LR
+    Q[Scientific problem] --> C["1 · Rewriting<br/>Consultant"]
+    C --> P["2 · Resolution<br/>Programmer + Python"]
+    P --> R["3 · Review<br/>Reviewer"]
+    R -->|Revise| V["4 · Revision<br/>Programmer + Python"]
+    V --> R
+    R -->|Accept| O[Code and execution results]
+```
+
+- **Rewriting** expands the problem context and proposes solution plans.
+- **Resolution** selects an approach, generates Python code, and executes it.
+- **Review** examines the implementation and runtime evidence, optionally including figures.
+- **Revision** updates the implementation using diagnostic feedback and executes it again.
+
+<details>
+<summary><strong>View the original framework schematic</strong></summary>
+
+![Re4 framework schematic](schematic_re4.png)
+
+</details>
+
+## Repository map
+
+```text
+streamlit_app.py             Interactive workspace
+re4_ui/                     Archive parsing and execution helpers
+assets/results/             Regenerated gallery images, animation and manifest
+tools/build_showcase.py      Reproduce the selected result assets
+docs/                       App guide, deployment and result provenance
 src/
-├── ipynb_ver     # code in Jupyter Notebook (.ipynb) format
-└── pycodes_ver   # code packaged as Python scripts (.py) format
+├── pycodes_ver/             Original Python agent implementation
+└── ipynb_ver/
+    ├── *.ipynb              Original notebook versions
+    └── sample_results/      Archived interactions, generated code and reference data
 ```
 
-## 📧 Contact
-This work is presented at the **ICLR 2026 Workshop on AI and Partial Differential Equations (AI&PDE)** [![OpenReview](https://img.shields.io/badge/OpenReview-PMdr3fQpBE-blue.svg)](https://openreview.net/forum?id=PMdr3fQpBE).
+To regenerate the gallery after installing `requirements.txt`:
 
-If you find this repository useful, please consider giving a star ⭐ and cite our conference Workshop paper.
-
+```bash
+python tools/build_showcase.py
 ```
+
+The original agent entry point remains `src/pycodes_ver/main.py`. It uses LangGraph, Pydantic response models, an OpenAI-compatible client, and the problem definitions in `problems.py`. Its optional dependencies are listed in `requirements-live.txt`; the [app guide](docs/streamlit.md) explains configuration and how the Streamlit view relates to the original implementation.
+
+## Citation
+
+The workshop paper is available on [OpenReview](https://openreview.net/forum?id=PMdr3fQpBE). If this repository helps your research, please cite:
+
+```bibtex
 @inproceedings{cheng2026re,
   title={Re4: Scientific Computing Agent with Rewriting, Resolution, Review and Revision},
   author={Ao Cheng and Lei Zhang and Guowei He},
@@ -37,3 +121,5 @@ If you find this repository useful, please consider giving a star ⭐ and cite o
   url={https://openreview.net/forum?id=PMdr3fQpBE}
 }
 ```
+
+Code is distributed under the [MIT License](LICENSE).

@@ -1,0 +1,18 @@
+{
+  "id": "helmholtz",
+  "title": "Helmholtz-type equation",
+  "subtitle": "Screened elliptic field · irregular domain",
+  "category": "PDE",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Hemholtz/GPT_ans/solu_rev_2.dat",
+  "description": "A screened elliptic solve from the archive (named Poisson–Boltzmann in the generated code), on a square with four differently sized holes.",
+  "image": "assets/results/helmholtz.png",
+  "metrics": {
+    "Solver execution": "1.12 s",
+    "Grid": "201 × 201",
+    "Field range": "-0.7107–1.3410",
+    "Linear residual L2": "3.411e-03"
+  },
+  "source_sha256": "d2be84a4a7943244eb661db4c4bc3be00ee847f4579c1d67d44539eff58ad174",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/helmholtz.txt"
+}

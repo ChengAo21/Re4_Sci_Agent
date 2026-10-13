@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-13",
+  "python": "3.12.14",
+  "streamlit": "1.65.0",
+  "tests_passed": 20,
+  "tests_elapsed_seconds": 15.6,
+  "original_solvers_regenerated": 10,
+  "cylinder_snapshots": 66,
+  "cylinder_grid": [
+    220,
+    120
+  ],
+  "cylinder_final_time": 20,
+  "browser_checks": [
+    "Gallery renders all 10 cases",
+    "Archived Consultant, Programmer, execution and Reviewer exchanges visible",
+    "Fresh Sod run: 2.16 s, exit 0, 1 generated plot",
+    "Console and generated figure tabs visible",
+    "Cylinder slider: actual t=0 state 1/66 and t=20 state 66/66 rendered"
+  ],
+  "server_health": "HTTP 200: ok",
+  "live_provider_calls": "Not run; no API credential used",
+  "docker_build": "Not run; Docker unavailable on this host",
+  "markdown_local_links": "passed",
+  "source_hashes": "10/10 matched"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "unsteady_ns",
+  "title": "Unsteady Navier–Stokes",
+  "subtitle": "Pressure projection · t = 0.5",
+  "category": "Flow",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Unsteady_NS/GPT_ans/sample1/solu_rev_2.dat",
+  "description": "The two velocity components and pressure of the archived generated solver at its original final time. Displayed fields are illustrative outputs, not a claim of validation against the reference.",
+  "image": "assets/results/unsteady_ns.png",
+  "metrics": {
+    "Solver execution": "7.24 s",
+    "Grid": "81 × 41",
+    "Final time": "0.5",
+    "Time step": "0.002",
+    "Final divergence max": "1.100e-01"
+  },
+  "source_sha256": "6b168740b62c55858eac8fe4cc2de7d837c4833b94ff80b404e81eec95141ce0",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/unsteady_ns.txt",
+  "note": "A successful execution is not an accuracy certification. Divergence diagnostics are reported from this run; no solver correction or reference-error claim is added."
+}

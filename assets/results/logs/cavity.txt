@@ -1,0 +1,34 @@
+Starting Artificial Compressibility Method iterations...
+Iteration     1: max update = 5.000e-01
+Iteration  1000: max update = 1.773e-04
+Iteration  2000: max update = 1.071e-04
+Iteration  3000: max update = 9.070e-05
+Iteration  4000: max update = 5.461e-05
+Iteration  5000: max update = 4.904e-05
+Iteration  6000: max update = 3.988e-05
+Iteration  7000: max update = 2.633e-05
+Iteration  8000: max update = 2.166e-05
+Iteration  9000: max update = 1.660e-05
+Iteration 10000: max update = 1.713e-05
+Iteration 11000: max update = 1.475e-05
+Iteration 12000: max update = 1.222e-05
+Iteration 13000: max update = 1.082e-05
+Iteration 14000: max update = 9.038e-06
+Iteration 15000: max update = 7.131e-06
+Iteration 16000: max update = 5.661e-06
+Iteration 17000: max update = 4.417e-06
+Iteration 18000: max update = 3.477e-06
+Iteration 19000: max update = 2.617e-06
+Iteration 20000: max update = 1.940e-06
+Iteration 21000: max update = 1.513e-06
+Iteration 22000: max update = 1.214e-06
+Converged after 22974 iterations with max update = 9.983e-07
+
+Detailed results at selected points:
+At (x=0.50, y=1.00): u = 0.50000, v = 0.00000, p = -0.01075, |velocity| = 0.50000
+At (x=0.50, y=0.50): u = -0.08979, v = 0.01568, p = -0.00373, |velocity| = 0.09115
+At (x=0.25, y=0.75): u = -0.01844, v = 0.11627, p = -0.01700, |velocity| = 0.11773
+At (x=0.75, y=0.25): u = -0.03183, v = -0.02486, p = 0.00463, |velocity| = 0.04038
+At (x=0.00, y=0.00): u = 0.00000, v = 0.00000, p = 0.00000, |velocity| = 0.00000
+
+Artificial Compressibility Method solution completed and figure saved as 'velocity_streamlines_acm.png'.

@@ -1,0 +1,528 @@
+Starting time integration...
+Time step 1/250, t=0.002: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.402e-09
+Time step 2/250, t=0.004: GMRES converged in 88 iterations.
+  Final GMRES residual norm: 1.934e-10
+Time step 3/250, t=0.006: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.047e-09
+Time step 4/250, t=0.008: GMRES converged in 84 iterations.
+  Final GMRES residual norm: 2.278e-10
+Time step 5/250, t=0.010: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 2.494e-09
+Time step 6/250, t=0.012: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 2.250e-09
+Time step 7/250, t=0.014: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 2.460e-09
+Time step 8/250, t=0.016: GMRES converged in 60 iterations.
+  Final GMRES residual norm: 2.976e-09
+Time step 9/250, t=0.018: GMRES converged in 60 iterations.
+  Final GMRES residual norm: 2.343e-09
+Time step 10/250, t=0.020: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 3.277e-09
+Step 10/250, t=0.020, max divergence = 1.827e+00, L2 norm divergence = 3.453e-03
+Time step 11/250, t=0.022: GMRES converged in 77 iterations.
+  Final GMRES residual norm: 2.535e-10
+Time step 12/250, t=0.024: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 3.780e-09
+Time step 13/250, t=0.026: GMRES converged in 49 iterations.
+  Final GMRES residual norm: 4.465e-09
+Time step 14/250, t=0.028: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 3.403e-10
+Time step 15/250, t=0.030: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 4.954e-10
+Time step 16/250, t=0.032: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 8.043e-10
+Time step 17/250, t=0.034: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 5.547e-10
+Time step 18/250, t=0.036: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 4.310e-10
+Time step 19/250, t=0.038: GMRES converged in 40 iterations.
+  Final GMRES residual norm: 4.670e-09
+Time step 20/250, t=0.040: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 3.378e-10
+Step 20/250, t=0.040, max divergence = 1.888e+00, L2 norm divergence = 3.596e-03
+Time step 21/250, t=0.042: GMRES converged in 49 iterations.
+  Final GMRES residual norm: 3.092e-09
+Time step 22/250, t=0.044: GMRES converged in 71 iterations.
+  Final GMRES residual norm: 1.814e-10
+Time step 23/250, t=0.046: GMRES converged in 76 iterations.
+  Final GMRES residual norm: 2.154e-10
+Time step 24/250, t=0.048: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 3.700e-09
+Time step 25/250, t=0.050: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 2.098e-09
+Time step 26/250, t=0.052: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 2.330e-09
+Time step 27/250, t=0.054: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 2.549e-09
+Time step 28/250, t=0.056: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 2.766e-09
+Time step 29/250, t=0.058: GMRES converged in 79 iterations.
+  Final GMRES residual norm: 2.483e-10
+Time step 30/250, t=0.060: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 3.322e-09
+Step 30/250, t=0.060, max divergence = 1.623e+00, L2 norm divergence = 3.033e-03
+Time step 31/250, t=0.062: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 3.568e-09
+Time step 32/250, t=0.064: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 3.821e-09
+Time step 33/250, t=0.066: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.420e-09
+Time step 34/250, t=0.068: GMRES converged in 77 iterations.
+  Final GMRES residual norm: 2.861e-10
+Time step 35/250, t=0.070: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 3.824e-09
+Time step 36/250, t=0.072: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 4.068e-09
+Time step 37/250, t=0.074: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 4.319e-09
+Time step 38/250, t=0.076: GMRES converged in 57 iterations.
+  Final GMRES residual norm: 3.343e-09
+Time step 39/250, t=0.078: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 3.665e-09
+Time step 40/250, t=0.080: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 3.873e-09
+Step 40/250, t=0.080, max divergence = 1.219e+00, L2 norm divergence = 2.250e-03
+Time step 41/250, t=0.082: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.681e-09
+Time step 42/250, t=0.084: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 1.482e-10
+Time step 43/250, t=0.086: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 1.603e-10
+Time step 44/250, t=0.088: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 1.702e-10
+Time step 45/250, t=0.090: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 1.802e-10
+Time step 46/250, t=0.092: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 1.910e-10
+Time step 47/250, t=0.094: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 2.029e-10
+Time step 48/250, t=0.096: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 2.159e-10
+Time step 49/250, t=0.098: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.170e-09
+Time step 50/250, t=0.100: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.374e-09
+Step 50/250, t=0.100, max divergence = 7.696e-01, L2 norm divergence = 1.426e-03
+Time step 51/250, t=0.102: GMRES converged in 81 iterations.
+  Final GMRES residual norm: 2.075e-10
+Time step 52/250, t=0.104: GMRES converged in 81 iterations.
+  Final GMRES residual norm: 2.217e-10
+Time step 53/250, t=0.106: GMRES converged in 81 iterations.
+  Final GMRES residual norm: 2.376e-10
+Time step 54/250, t=0.108: GMRES converged in 81 iterations.
+  Final GMRES residual norm: 2.553e-10
+Time step 55/250, t=0.110: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 3.166e-09
+Time step 56/250, t=0.112: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.504e-09
+Time step 57/250, t=0.114: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.802e-09
+Time step 58/250, t=0.116: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.159e-09
+Time step 59/250, t=0.118: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.576e-09
+Time step 60/250, t=0.120: GMRES converged in 75 iterations.
+  Final GMRES residual norm: 2.817e-10
+Step 60/250, t=0.120, max divergence = 3.179e-01, L2 norm divergence = 6.240e-04
+Time step 61/250, t=0.122: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 2.295e-09
+Time step 62/250, t=0.124: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 2.591e-09
+Time step 63/250, t=0.126: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 2.944e-09
+Time step 64/250, t=0.128: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 2.882e-09
+Time step 65/250, t=0.130: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.225e-09
+Time step 66/250, t=0.132: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.511e-09
+Time step 67/250, t=0.134: GMRES converged in 72 iterations.
+  Final GMRES residual norm: 1.472e-10
+Time step 68/250, t=0.136: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.480e-09
+Time step 69/250, t=0.138: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.126e-09
+Time step 70/250, t=0.140: GMRES converged in 76 iterations.
+  Final GMRES residual norm: 2.881e-10
+Step 70/250, t=0.140, max divergence = 1.089e-01, L2 norm divergence = 2.392e-04
+Time step 71/250, t=0.142: GMRES converged in 76 iterations.
+  Final GMRES residual norm: 2.423e-10
+Time step 72/250, t=0.144: GMRES converged in 76 iterations.
+  Final GMRES residual norm: 2.037e-10
+Time step 73/250, t=0.146: GMRES converged in 72 iterations.
+  Final GMRES residual norm: 2.419e-10
+Time step 74/250, t=0.148: GMRES converged in 71 iterations.
+  Final GMRES residual norm: 4.223e-10
+Time step 75/250, t=0.150: GMRES converged in 70 iterations.
+  Final GMRES residual norm: 3.673e-10
+Time step 76/250, t=0.152: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 2.072e-10
+Time step 77/250, t=0.154: GMRES converged in 46 iterations.
+  Final GMRES residual norm: 3.916e-09
+Time step 78/250, t=0.156: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 3.893e-10
+Time step 79/250, t=0.158: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 3.498e-10
+Time step 80/250, t=0.160: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 2.938e-10
+Step 80/250, t=0.160, max divergence = 4.875e-01, L2 norm divergence = 8.672e-04
+Time step 81/250, t=0.162: GMRES converged in 42 iterations.
+  Final GMRES residual norm: 3.641e-09
+Time step 82/250, t=0.164: GMRES converged in 42 iterations.
+  Final GMRES residual norm: 3.385e-09
+Time step 83/250, t=0.166: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 3.610e-10
+Time step 84/250, t=0.168: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 2.998e-10
+Time step 85/250, t=0.170: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 2.880e-10
+Time step 86/250, t=0.172: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 3.110e-10
+Time step 87/250, t=0.174: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.452e-10
+Time step 88/250, t=0.176: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.282e-10
+Time step 89/250, t=0.178: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.126e-10
+Time step 90/250, t=0.180: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.981e-10
+Step 90/250, t=0.180, max divergence = 7.978e-01, L2 norm divergence = 1.430e-03
+Time step 91/250, t=0.182: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.846e-10
+Time step 92/250, t=0.184: GMRES converged in 42 iterations.
+  Final GMRES residual norm: 3.466e-09
+Time step 93/250, t=0.186: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 3.466e-10
+Time step 94/250, t=0.188: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 3.228e-10
+Time step 95/250, t=0.190: GMRES converged in 57 iterations.
+  Final GMRES residual norm: 6.221e-10
+Time step 96/250, t=0.192: GMRES converged in 58 iterations.
+  Final GMRES residual norm: 5.646e-10
+Time step 97/250, t=0.194: GMRES converged in 58 iterations.
+  Final GMRES residual norm: 5.239e-10
+Time step 98/250, t=0.196: GMRES converged in 58 iterations.
+  Final GMRES residual norm: 4.861e-10
+Time step 99/250, t=0.198: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 4.204e-10
+Time step 100/250, t=0.200: GMRES converged in 57 iterations.
+  Final GMRES residual norm: 2.782e-10
+Step 100/250, t=0.200, max divergence = 1.023e+00, L2 norm divergence = 1.856e-03
+Time step 101/250, t=0.202: GMRES converged in 58 iterations.
+  Final GMRES residual norm: 2.532e-10
+Time step 102/250, t=0.204: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 5.584e-10
+Time step 103/250, t=0.206: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 4.872e-10
+Time step 104/250, t=0.208: GMRES converged in 60 iterations.
+  Final GMRES residual norm: 4.898e-10
+Time step 105/250, t=0.210: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.692e-10
+Time step 106/250, t=0.212: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.251e-10
+Time step 107/250, t=0.214: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 5.671e-10
+Time step 108/250, t=0.216: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 4.751e-10
+Time step 109/250, t=0.218: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 5.898e-10
+Time step 110/250, t=0.220: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 4.903e-10
+Step 110/250, t=0.220, max divergence = 1.151e+00, L2 norm divergence = 2.119e-03
+Time step 111/250, t=0.222: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 3.999e-10
+Time step 112/250, t=0.224: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 1.684e-10
+Time step 113/250, t=0.226: GMRES converged in 37 iterations.
+  Final GMRES residual norm: 3.545e-09
+Time step 114/250, t=0.228: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 4.988e-10
+Time step 115/250, t=0.230: GMRES converged in 47 iterations.
+  Final GMRES residual norm: 1.168e-09
+Time step 116/250, t=0.232: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 9.830e-10
+Time step 117/250, t=0.234: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 6.466e-10
+Time step 118/250, t=0.236: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 4.152e-10
+Time step 119/250, t=0.238: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 5.862e-10
+Time step 120/250, t=0.240: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 3.532e-10
+Step 120/250, t=0.240, max divergence = 1.175e+00, L2 norm divergence = 2.199e-03
+Time step 121/250, t=0.242: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 4.494e-10
+Time step 122/250, t=0.244: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 3.558e-10
+Time step 123/250, t=0.246: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 4.321e-10
+Time step 124/250, t=0.248: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 5.122e-10
+Time step 125/250, t=0.250: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 5.954e-10
+Time step 126/250, t=0.252: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 6.811e-10
+Time step 127/250, t=0.254: GMRES converged in 51 iterations.
+  Final GMRES residual norm: 7.688e-10
+Time step 128/250, t=0.256: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.740e-10
+Time step 129/250, t=0.258: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.087e-10
+Time step 130/250, t=0.260: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.442e-10
+Step 130/250, t=0.260, max divergence = 1.095e+00, L2 norm divergence = 2.090e-03
+Time step 131/250, t=0.262: GMRES converged in 39 iterations.
+  Final GMRES residual norm: 3.597e-09
+Time step 132/250, t=0.264: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 1.855e-10
+Time step 133/250, t=0.266: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 2.449e-10
+Time step 134/250, t=0.268: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.638e-10
+Time step 135/250, t=0.270: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.132e-10
+Time step 136/250, t=0.272: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.086e-10
+Time step 137/250, t=0.274: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.275e-10
+Time step 138/250, t=0.276: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.468e-10
+Time step 139/250, t=0.278: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.659e-10
+Time step 140/250, t=0.280: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.844e-10
+Step 140/250, t=0.280, max divergence = 9.213e-01, L2 norm divergence = 1.799e-03
+Time step 141/250, t=0.282: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.022e-10
+Time step 142/250, t=0.284: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.873e-10
+Time step 143/250, t=0.286: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.066e-10
+Time step 144/250, t=0.288: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.261e-10
+Time step 145/250, t=0.290: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.459e-10
+Time step 146/250, t=0.292: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.661e-10
+Time step 147/250, t=0.294: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 4.281e-10
+Time step 148/250, t=0.296: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 4.493e-10
+Time step 149/250, t=0.298: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 4.720e-10
+Time step 150/250, t=0.300: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 4.964e-10
+Step 150/250, t=0.300, max divergence = 6.742e-01, L2 norm divergence = 1.355e-03
+Time step 151/250, t=0.302: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 5.227e-10
+Time step 152/250, t=0.304: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 5.512e-10
+Time step 153/250, t=0.306: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 5.822e-10
+Time step 154/250, t=0.308: GMRES converged in 42 iterations.
+  Final GMRES residual norm: 3.495e-09
+Time step 155/250, t=0.310: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.517e-10
+Time step 156/250, t=0.312: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.611e-10
+Time step 157/250, t=0.314: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.717e-10
+Time step 158/250, t=0.316: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.835e-10
+Time step 159/250, t=0.318: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 1.968e-10
+Time step 160/250, t=0.320: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.118e-10
+Step 160/250, t=0.320, max divergence = 3.801e-01, L2 norm divergence = 8.074e-04
+Time step 161/250, t=0.322: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.291e-10
+Time step 162/250, t=0.324: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.491e-10
+Time step 163/250, t=0.326: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 2.724e-10
+Time step 164/250, t=0.328: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.000e-10
+Time step 165/250, t=0.330: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.330e-10
+Time step 166/250, t=0.332: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.728e-10
+Time step 167/250, t=0.334: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.044e-10
+Time step 168/250, t=0.336: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 2.090e-10
+Time step 169/250, t=0.338: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 2.391e-10
+Time step 170/250, t=0.340: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 2.724e-10
+Step 170/250, t=0.340, max divergence = 1.490e-01, L2 norm divergence = 2.543e-04
+Time step 171/250, t=0.342: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 3.031e-10
+Time step 172/250, t=0.344: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 3.201e-10
+Time step 173/250, t=0.346: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 3.138e-10
+Time step 174/250, t=0.348: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 2.868e-10
+Time step 175/250, t=0.350: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 2.512e-10
+Time step 176/250, t=0.352: GMRES converged in 69 iterations.
+  Final GMRES residual norm: 2.164e-10
+Time step 177/250, t=0.354: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 4.591e-10
+Time step 178/250, t=0.356: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 4.017e-10
+Time step 179/250, t=0.358: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 3.546e-10
+Time step 180/250, t=0.360: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 3.160e-10
+Step 180/250, t=0.360, max divergence = 2.194e-01, L2 norm divergence = 4.261e-04
+Time step 181/250, t=0.362: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 2.840e-10
+Time step 182/250, t=0.364: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 2.572e-10
+Time step 183/250, t=0.366: GMRES converged in 63 iterations.
+  Final GMRES residual norm: 2.345e-10
+Time step 184/250, t=0.368: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 4.651e-10
+Time step 185/250, t=0.370: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 4.203e-10
+Time step 186/250, t=0.372: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.797e-10
+Time step 187/250, t=0.374: GMRES converged in 64 iterations.
+  Final GMRES residual norm: 3.420e-10
+Time step 188/250, t=0.376: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 7.262e-10
+Time step 189/250, t=0.378: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 6.686e-10
+Time step 190/250, t=0.380: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 4.531e-10
+Step 190/250, t=0.380, max divergence = 4.590e-01, L2 norm divergence = 8.863e-04
+Time step 191/250, t=0.382: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 4.166e-10
+Time step 192/250, t=0.384: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 3.829e-10
+Time step 193/250, t=0.386: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 3.516e-10
+Time step 194/250, t=0.388: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 3.221e-10
+Time step 195/250, t=0.390: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 2.942e-10
+Time step 196/250, t=0.392: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 1.004e-09
+Time step 197/250, t=0.394: GMRES converged in 54 iterations.
+  Final GMRES residual norm: 9.074e-10
+Time step 198/250, t=0.396: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 8.327e-10
+Time step 199/250, t=0.398: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 7.444e-10
+Time step 200/250, t=0.400: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 6.609e-10
+Step 200/250, t=0.400, max divergence = 6.208e-01, L2 norm divergence = 1.204e-03
+Time step 201/250, t=0.402: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 5.820e-10
+Time step 202/250, t=0.404: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 5.072e-10
+Time step 203/250, t=0.406: GMRES converged in 53 iterations.
+  Final GMRES residual norm: 4.363e-10
+Time step 204/250, t=0.408: GMRES converged in 52 iterations.
+  Final GMRES residual norm: 4.449e-10
+Time step 205/250, t=0.410: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 8.015e-10
+Time step 206/250, t=0.412: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 6.562e-10
+Time step 207/250, t=0.414: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 5.180e-10
+Time step 208/250, t=0.416: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 3.891e-10
+Time step 209/250, t=0.418: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 2.740e-10
+Time step 210/250, t=0.420: GMRES converged in 37 iterations.
+  Final GMRES residual norm: 3.423e-09
+Step 210/250, t=0.420, max divergence = 6.873e-01, L2 norm divergence = 1.333e-03
+Time step 211/250, t=0.422: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 3.207e-10
+Time step 212/250, t=0.424: GMRES converged in 58 iterations.
+  Final GMRES residual norm: 4.532e-10
+Time step 213/250, t=0.426: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 2.648e-10
+Time step 214/250, t=0.428: GMRES converged in 37 iterations.
+  Final GMRES residual norm: 4.269e-09
+Time step 215/250, t=0.430: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 3.490e-10
+Time step 216/250, t=0.432: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 4.457e-10
+Time step 217/250, t=0.434: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 5.392e-10
+Time step 218/250, t=0.436: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 6.372e-10
+Time step 219/250, t=0.438: GMRES converged in 50 iterations.
+  Final GMRES residual norm: 7.402e-10
+Time step 220/250, t=0.440: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 3.788e-10
+Step 220/250, t=0.440, max divergence = 6.540e-01, L2 norm divergence = 1.265e-03
+Time step 221/250, t=0.442: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.273e-10
+Time step 222/250, t=0.444: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 4.779e-10
+Time step 223/250, t=0.446: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 5.308e-10
+Time step 224/250, t=0.448: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 5.861e-10
+Time step 225/250, t=0.450: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 6.441e-10
+Time step 226/250, t=0.452: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 7.049e-10
+Time step 227/250, t=0.454: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 7.687e-10
+Time step 228/250, t=0.456: GMRES converged in 55 iterations.
+  Final GMRES residual norm: 8.360e-10
+Time step 229/250, t=0.458: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 3.591e-10
+Time step 230/250, t=0.460: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 3.902e-10
+Step 230/250, t=0.460, max divergence = 5.310e-01, L2 norm divergence = 1.027e-03
+Time step 231/250, t=0.462: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 4.218e-10
+Time step 232/250, t=0.464: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 4.541e-10
+Time step 233/250, t=0.466: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 4.876e-10
+Time step 234/250, t=0.468: GMRES converged in 62 iterations.
+  Final GMRES residual norm: 5.224e-10
+Time step 235/250, t=0.470: GMRES converged in 61 iterations.
+  Final GMRES residual norm: 6.225e-10
+Time step 236/250, t=0.472: GMRES converged in 60 iterations.
+  Final GMRES residual norm: 6.699e-10
+Time step 237/250, t=0.474: GMRES converged in 60 iterations.
+  Final GMRES residual norm: 7.137e-10
+Time step 238/250, t=0.476: GMRES converged in 60 iterations.
+  Final GMRES residual norm: 7.615e-10
+Time step 239/250, t=0.478: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 8.546e-10
+Time step 240/250, t=0.480: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 9.153e-10
+Step 240/250, t=0.480, max divergence = 3.402e-01, L2 norm divergence = 6.674e-04
+Time step 241/250, t=0.482: GMRES converged in 59 iterations.
+  Final GMRES residual norm: 9.837e-10
+Time step 242/250, t=0.484: GMRES converged in 56 iterations.
+  Final GMRES residual norm: 4.255e-10
+Time step 243/250, t=0.486: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.583e-10
+Time step 244/250, t=0.488: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 2.849e-10
+Time step 245/250, t=0.490: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.162e-10
+Time step 246/250, t=0.492: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.537e-10
+Time step 247/250, t=0.494: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 3.993e-10
+Time step 248/250, t=0.496: GMRES converged in 65 iterations.
+  Final GMRES residual norm: 4.556e-10
+Time step 249/250, t=0.498: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 2.563e-10
+Time step 250/250, t=0.500: GMRES converged in 68 iterations.
+  Final GMRES residual norm: 3.003e-10
+Step 250/250, t=0.500, max divergence = 1.100e-01, L2 norm divergence = 2.499e-04
+Time integration completed.
+Contour plots saved: 'velocity_u_t0.5.png', 'velocity_v_t0.5.png', 'pressure_p_t0.5.png'.

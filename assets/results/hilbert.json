@@ -1,0 +1,18 @@
+{
+  "id": "hilbert",
+  "title": "Hilbert linear systems",
+  "subtitle": "Conditioning · direct methods · regularization",
+  "category": "Linear algebra",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/Hilbert/GPT_ans/sample1/solu_rev_2.dat",
+  "description": "Forward errors and condition numbers from one generated implementation. Failed decompositions remain visible as missing values rather than being silently repaired.",
+  "image": "assets/results/hilbert.png",
+  "metrics": {
+    "Solver execution": "1.19 s",
+    "Matrix sizes": "5–50",
+    "Regularization": "1e-12",
+    "Failed original Cholesky": "8"
+  },
+  "source_sha256": "5441d76b04166a1fc344622a4293b332632b5494158eba15da5d5c6edd0f4151",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/hilbert.txt"
+}

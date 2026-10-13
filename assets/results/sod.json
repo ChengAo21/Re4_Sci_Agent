@@ -1,0 +1,18 @@
+{
+  "id": "sod",
+  "title": "Sod shock tube",
+  "subtitle": "Compressible flow · t = 0.2",
+  "category": "PDE",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/SodShock/GPT_ans/sample1/solu_rev_2.dat",
+  "description": "Density, velocity and pressure from one archived GPT final-revision solver, rerun on its original 400-cell grid.",
+  "image": "assets/results/sod.png",
+  "metrics": {
+    "Solver execution": "2.04 s",
+    "Grid": "400 cells",
+    "Final time": "0.200",
+    "Density range": "0.125–1.000"
+  },
+  "source_sha256": "8a6ad3b10180b898ee265df73e7296fcd7c6858b6bfb8ba3c6109b09531c705a",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/sod.txt"
+}

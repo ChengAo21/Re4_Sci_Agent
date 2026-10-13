@@ -1,0 +1,15 @@
+Dimensional Matrix (rows: M,L,T,Theta; cols: h,lambda,delta_T,g,alpha,nu,kappa):
+[[ 0.  1.  0.  0.  0.  0.  0.]
+ [ 1.  1.  0.  1.  0.  2.  2.]
+ [ 0. -3.  0. -2.  0. -1. -1.]
+ [ 0. -1.  1.  0. -1.  0.  0.]]
+Generated 128 candidate dimensionless groups.
+Best dimensionless group exponents normalized by alpha:
+h: 3 (3.000)
+lambda: 0 (0.000)
+delta_T: 1 (1.000)
+g: 1 (1.000)
+alpha: 1 (1.000)
+nu: -1 (-1.000)
+kappa: -1 (-1.000)
+Best R-squared: 0.99234

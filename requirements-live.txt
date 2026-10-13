@@ -1,0 +1,6 @@
+-r requirements.txt
+# Optional live API runner and the original LangGraph implementation.
+openai>=1.55,<4
+pydantic>=2.8,<3
+langgraph>=0.2,<2
+ipython>=8,<10

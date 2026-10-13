@@ -1,0 +1,18 @@
+{
+  "id": "burgers",
+  "title": "Viscous Burgers equation",
+  "subtitle": "Nonlinear transport · t = 1",
+  "category": "PDE",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Burgers_equ/GPT_ans/sample1/solu_rev_2.dat",
+  "description": "Space–time evolution and the final velocity profile from an archived MUSCL-type limited solver with implicit diffusion.",
+  "image": "assets/results/burgers.png",
+  "metrics": {
+    "Solver execution": "0.88 s",
+    "Grid": "201 points",
+    "Final time": "1.000",
+    "Saved states": "230"
+  },
+  "source_sha256": "78928b0c181e263cd736492c2b66ca68d8fbb2e2b6831a8797e7bbb8f93c51fe",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/burgers.txt"
+}

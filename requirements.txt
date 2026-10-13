@@ -1,0 +1,8 @@
+# Gallery, archived interaction replay, numerical execution and asset generation.
+streamlit>=1.50,<2
+numpy>=1.26,<3
+scipy>=1.11,<2
+matplotlib>=3.8,<4
+pandas>=2.1,<4
+pillow>=10,<13
+scikit-learn>=1.4,<2

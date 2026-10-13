@@ -1,0 +1,18 @@
+{
+  "id": "poisson",
+  "title": "Poisson / Laplace equation",
+  "subtitle": "Four-hole domain · sparse linear solve",
+  "category": "PDE",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Poisson_equ/GPT_ans/solu_rev_2.dat",
+  "description": "The archived Poisson task is a zero-source Laplace solve on a square with four circular holes. Hole interiors are masked in the presentation.",
+  "image": "assets/results/poisson.png",
+  "metrics": {
+    "Solver execution": "1.06 s",
+    "Grid": "201 × 201",
+    "Field range": "0.0000–1.0000",
+    "Linear residual L2": "5.255e-14"
+  },
+  "source_sha256": "55c94d63f9e9c82618d4a9e1eebdff44b51f99a7d9184fc4e68062a543eef3f6",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/poisson.txt"
+}

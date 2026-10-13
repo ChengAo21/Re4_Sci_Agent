@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="460" viewBox="0 0 1400 460" role="img" aria-labelledby="title desc">
+  <title id="title">Re4 — Scientific Computing Agent</title>
+  <desc id="desc">Rewriting, Resolution, Review and Revision. A scientific computing workflow from problem statement to executable Python and iterative diagnostic feedback.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101d35"/><stop offset="1" stop-color="#173f50"/></linearGradient>
+    <linearGradient id="accent" x1="0" x2="1"><stop stop-color="#46d1b9"/><stop offset="1" stop-color="#6cbde8"/></linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#75b3c7" stroke-opacity=".07"/></pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#5c9bb0"/></marker>
+  </defs>
+  <rect width="1400" height="460" rx="24" fill="url(#bg)"/>
+  <rect width="1400" height="460" rx="24" fill="url(#grid)"/>
+  <circle cx="1330" cy="40" r="250" fill="#33bca9" opacity=".035"/>
+  <rect x="64" y="55" width="163" height="28" rx="14" fill="#3bd0b4" opacity=".15"/>
+  <text x="80" y="74" fill="#8ce9d6" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="700" letter-spacing="1.6">SCIENTIFIC COMPUTING</text>
+  <text x="64" y="156" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="73" font-weight="700" letter-spacing="-2">Re<tspan fill="#65d7c7">4</tspan></text>
+  <text x="224" y="151" fill="#eff7fc" font-family="Arial,Helvetica,sans-serif" font-size="36" font-weight="600">Scientific Computing Agent</text>
+  <text x="67" y="202" fill="#b4ccda" font-family="Arial,Helvetica,sans-serif" font-size="18">From a scientific question to executable solutions, guided by iterative feedback.</text>
+  <g font-family="Arial,Helvetica,sans-serif">
+    <g transform="translate(64 253)">
+      <rect width="282" height="111" rx="14" fill="#1d3a4b" stroke="#416677"/>
+      <text x="20" y="28" font-size="11" fill="#64d9c4" font-weight="700" letter-spacing="1.3">01 / CONSULTANT</text>
+      <text x="20" y="60" font-size="22" fill="#f3f8fc" font-weight="700">Rewriting</text>
+      <text x="20" y="88" font-size="13" fill="#b2cbd8">Clarify the problem and propose a plan</text>
+    </g>
+    <g transform="translate(394 253)">
+      <rect width="282" height="111" rx="14" fill="#1d3a4b" stroke="#416677"/>
+      <text x="20" y="28" font-size="11" fill="#64d9c4" font-weight="700" letter-spacing="1.3">02 / PROGRAMMER</text>
+      <text x="20" y="60" font-size="22" fill="#f3f8fc" font-weight="700">Resolution</text>
+      <text x="20" y="88" font-size="13" fill="#b2cbd8">Generate Python and execute the solver</text>
+    </g>
+    <g transform="translate(724 253)">
+      <rect width="282" height="111" rx="14" fill="#1d3a4b" stroke="#416677"/>
+      <text x="20" y="28" font-size="11" fill="#64d9c4" font-weight="700" letter-spacing="1.3">03 / REVIEWER</text>
+      <text x="20" y="60" font-size="22" fill="#f3f8fc" font-weight="700">Review</text>
+      <text x="20" y="88" font-size="13" fill="#b2cbd8">Inspect code, results and diagnostics</text>
+    </g>
+    <g transform="translate(1054 253)">
+      <rect width="282" height="111" rx="14" fill="#1d3a4b" stroke="#416677"/>
+      <text x="20" y="28" font-size="11" fill="#64d9c4" font-weight="700" letter-spacing="1.3">04 / PROGRAMMER</text>
+      <text x="20" y="60" font-size="22" fill="#f3f8fc" font-weight="700">Revision</text>
+      <text x="20" y="88" font-size="13" fill="#b2cbd8">Refine the code and run it again</text>
+    </g>
+  </g>
+  <g fill="none" stroke="#5c9bb0" stroke-width="2" marker-end="url(#arrow)"><path d="M354 308H382"/><path d="M684 308H712"/><path d="M1014 308H1042"/><path d="M1195 372V404H865V376" stroke-dasharray="5 5"/></g>
+  <text x="947" y="426" fill="#8eb0c2" font-family="Arial,Helvetica,sans-serif" font-size="11" letter-spacing="1">ITERATIVE REVIEW–REVISION LOOP</text>
+</svg>

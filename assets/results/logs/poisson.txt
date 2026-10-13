@@ -1,0 +1,17 @@
+Grid size: 201x201 = 40401 points
+Number of points inside holes: 5020
+Number of outer boundary points: 800
+Number of hole boundary points: 464
+Number of unknown interior points: 34117
+Sparse matrix A assembled.
+Matrix shape: (34117, 34117)
+Number of nonzeros in A: 169117
+Solving linear system...
+Linear system solved.
+Residual norm ||A u - b|| = 5.255e-14
+Solution u statistics (excluding holes):
+  min u = 0.0000
+  max u = 1.0000
+  mean u = 0.4413
+  max |u[i+1,j] - u[i,j]| = 0.0776
+  max |u[i,j+1] - u[i,j]| = 0.0776

@@ -1,0 +1,24 @@
+{
+  "id": "cylinder",
+  "title": "Cylinder flow",
+  "subtitle": "Re = 100 · staggered-grid projection",
+  "category": "Flow",
+  "source": "src/ipynb_ver/sample_results/_GPT5mini_/cylinder_for_Reproduction/sample1/solu_rev_2.dat",
+  "description": "A fresh execution of the archived final revision. The animation contains actual velocity snapshots from the time integration; the original grid and final time are retained.",
+  "image": "assets/results/cylinder.png",
+  "metrics": {
+    "Solver execution": "9.62 s",
+    "Grid": "220 × 120",
+    "Final time": "20",
+    "Reynolds number": "100",
+    "Snapshots": "66",
+    "Maximum final speed": "1.5221",
+    "Max divergence, all cells": "4.309e+01",
+    "Max divergence, outside cylinder": "1.977e-01"
+  },
+  "source_sha256": "d6a03f4cdf9e5db922756bf1846a7fd5bbfeb8b70c32d458a6d303196daa0744",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/cylinder.txt",
+  "gif": "assets/results/cylinder.gif",
+  "note": "The unchanged archived solver has nonzero discrete divergence (see diagnostics). This is an illustrative reproduction, not a validated incompressible reference solution. Snapshot arrays are stored as float32 for display; the solver runs in its original precision."
+}

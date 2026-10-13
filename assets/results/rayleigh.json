@@ -1,0 +1,18 @@
+{
+  "id": "rayleigh",
+  "title": "Rayleigh–Bénard scaling",
+  "subtitle": "Candidate groups · log–log regression",
+  "category": "Dimensional analysis",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/Rayleigh/GPT_ans/solu_rev_2.dat",
+  "description": "The archived dimensionless-group candidate search rerun on dataset_rayben.csv. R² describes the fitted dataset; it is not a held-out score.",
+  "image": "assets/results/rayleigh.png",
+  "metrics": {
+    "Solver execution": "2.94 s",
+    "Samples": "182",
+    "Candidates": "128",
+    "In-sample R²": "0.9923"
+  },
+  "source_sha256": "2836a30bb7238b6eea58b6f3390e1be5667223fdb896bcd6b4cb0a97d8ec8df2",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/rayleigh.txt"
+}

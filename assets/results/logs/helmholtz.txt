@@ -1,0 +1,8 @@
+Grid size: 201 x 201 = 40401 points
+Number of hole points (excluded): 9402
+Number of Dirichlet boundary points: 1376
+Number of unknown interior points: 29623
+Solving linear system with Conjugate Gradient solver...
+Conjugate Gradient solver converged successfully.
+Residual norm ||A u - b|| = 3.411e-03
+Contour plot saved as 'poisson_boltzmann_solution.png'.

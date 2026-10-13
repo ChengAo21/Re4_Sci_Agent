@@ -1,0 +1,19 @@
+{
+  "id": "cavity",
+  "title": "Lid-driven cavity",
+  "subtitle": "Artificial compressibility · Re = 100",
+  "category": "Flow",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Lid_Driven/GPT_ans/sample1/solu_rev_2.dat",
+  "description": "Velocity magnitude and streamlines from the archived artificial-compressibility implementation. The run's own stopping criterion and diagnostics are preserved.",
+  "image": "assets/results/cavity.png",
+  "metrics": {
+    "Solver execution": "8.66 s",
+    "Grid": "81 × 81",
+    "Iterations": "22974",
+    "Final max update": "9.983e-07",
+    "Tolerance": "1e-06"
+  },
+  "source_sha256": "296da20009f58c047632eb77b72f025420fda6bd1f01eef0c7dcdafc50ff6a89",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/cavity.txt"
+}

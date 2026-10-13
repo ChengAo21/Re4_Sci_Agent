@@ -1,0 +1,114 @@
+n = 5
+  Condition number of H_n: 4.766e+05
+  LU with scaled partial pivoting error (L∞): 1.993116782728066e-11
+  Cholesky decomposition error (L∞): 4.896638650109253e-12
+  QR decomposition (Householder) error (L∞): 4.82360817954941e-11
+  LU (regularized) error (L∞): 0.00030541968172204115
+  Cholesky (regularized) error (L∞): 0.00030119828484242994
+  QR (regularized) error (L∞): 0.00033330213123705654
+----------------------------------------------------------------------
+n = 10
+  Condition number of H_n: 1.602e+13
+  LU with scaled partial pivoting error (L∞): 0.00012262902182591517
+  Cholesky decomposition error (L∞): 9.652351543287807e-05
+  QR decomposition (Householder) error (L∞): 0.000219122715818032
+  LU (regularized) error (L∞): 0.0009357495816157968
+  Cholesky (regularized) error (L∞): 0.0007126015731586666
+  QR (regularized) error (L∞): 0.001279955737508054
+----------------------------------------------------------------------
+LU failed for n=15: Matrix is singular to working precision.
+Cholesky failed for n=15: Matrix is not positive definite (or numerically unstable).
+QR failed for n=15: Near-zero diagonal element in R matrix during QR solve.
+n = 15
+  Condition number of H_n: 8.718e+17
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.000992216163636872
+  Cholesky (regularized) error (L∞): 0.0008700466661394346
+  QR (regularized) error (L∞): 0.0013396842395926312
+----------------------------------------------------------------------
+LU failed for n=20: Matrix is singular to working precision.
+Cholesky failed for n=20: Matrix is not positive definite (or numerically unstable).
+QR failed for n=20: Near-zero diagonal element in R matrix during QR solve.
+n = 20
+  Condition number of H_n: 1.033e+19
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.001012947334288361
+  Cholesky (regularized) error (L∞): 0.0009329737763165147
+  QR (regularized) error (L∞): 0.0015897974947278737
+----------------------------------------------------------------------
+LU failed for n=25: Matrix is singular to working precision.
+Cholesky failed for n=25: Matrix is not positive definite (or numerically unstable).
+QR failed for n=25: Near-zero diagonal element in R matrix during QR solve.
+n = 25
+  Condition number of H_n: 1.777e+18
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.0012845428165719763
+  Cholesky (regularized) error (L∞): 0.0012286883074350552
+  QR (regularized) error (L∞): 0.0019331535742627137
+----------------------------------------------------------------------
+LU failed for n=30: Matrix is singular to working precision.
+Cholesky failed for n=30: Matrix is not positive definite (or numerically unstable).
+QR failed for n=30: Near-zero diagonal element in R matrix during QR solve.
+n = 30
+  Condition number of H_n: 2.267e+19
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.0012978857923577891
+  Cholesky (regularized) error (L∞): 0.0014858841010403356
+  QR (regularized) error (L∞): 0.002202094298919821
+----------------------------------------------------------------------
+LU failed for n=35: Matrix is singular to working precision.
+Cholesky failed for n=35: Matrix is not positive definite (or numerically unstable).
+QR failed for n=35: Near-zero diagonal element in R matrix during QR solve.
+n = 35
+  Condition number of H_n: 6.490e+18
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.0011853230295646444
+  Cholesky (regularized) error (L∞): 0.001248445042163926
+  QR (regularized) error (L∞): 0.0016597790051446903
+----------------------------------------------------------------------
+LU failed for n=40: Matrix is singular to working precision.
+Cholesky failed for n=40: Matrix is not positive definite (or numerically unstable).
+QR failed for n=40: Near-zero diagonal element in R matrix during QR solve.
+n = 40
+  Condition number of H_n: 4.588e+18
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.0014815327885790985
+  Cholesky (regularized) error (L∞): 0.0015109932287029615
+  QR (regularized) error (L∞): 0.002358194485176046
+----------------------------------------------------------------------
+LU failed for n=45: Matrix is singular to working precision.
+Cholesky failed for n=45: Matrix is not positive definite (or numerically unstable).
+QR failed for n=45: Near-zero diagonal element in R matrix during QR solve.
+n = 45
+  Condition number of H_n: 5.177e+18
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.001404709116844427
+  Cholesky (regularized) error (L∞): 0.0016374133858214623
+  QR (regularized) error (L∞): 0.004809014326323302
+----------------------------------------------------------------------
+LU failed for n=50: Matrix is singular to working precision.
+Cholesky failed for n=50: Matrix is not positive definite (or numerically unstable).
+QR failed for n=50: Near-zero diagonal element in R matrix during QR solve.
+n = 50
+  Condition number of H_n: 9.213e+18
+  LU with scaled partial pivoting error (L∞): fail
+  Cholesky decomposition error (L∞): fail
+  QR decomposition (Householder) error (L∞): fail
+  LU (regularized) error (L∞): 0.0014093794379239633
+  Cholesky (regularized) error (L∞): 0.0019333016425304717
+  QR (regularized) error (L∞): 0.0034621620631460903
+----------------------------------------------------------------------

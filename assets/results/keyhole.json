@@ -1,0 +1,17 @@
+{
+  "id": "keyhole",
+  "title": "Keyhole scaling",
+  "subtitle": "Dimensionless-group search · archived dataset",
+  "category": "Dimensional analysis",
+  "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/Keyhole/GPT_ans/solu_rev_2.dat",
+  "description": "The archived rational-exponent search and log–log regression rerun on dataset_keyhole.csv. R² describes the fitted dataset; it is not a held-out score.",
+  "image": "assets/results/keyhole.png",
+  "metrics": {
+    "Solver execution": "3.12 s",
+    "Samples": "90",
+    "In-sample R²": "0.9510"
+  },
+  "source_sha256": "cdbd80a03f745ed6227c167ef4f7ad0b7a951dffa56adef57e3f5f2aebaee074",
+  "numerical_modifications": "None; original algorithm, grid and final time retained.",
+  "execution_log": "assets/results/logs/keyhole.txt"
+}

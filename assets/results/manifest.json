@@ -1,0 +1,195 @@
+{
+  "generated_at": "2026-10-13T12:01:14.465058+00:00",
+  "provenance": "Fresh executions of selected archived final-revision Python blocks. Plots restyled; solvers and numerical parameters retained. These are individual example runs, not aggregate benchmark scores.",
+  "results": [
+    {
+      "id": "cylinder",
+      "title": "Cylinder flow",
+      "subtitle": "Re = 100 · staggered-grid projection",
+      "category": "Flow",
+      "source": "src/ipynb_ver/sample_results/_GPT5mini_/cylinder_for_Reproduction/sample1/solu_rev_2.dat",
+      "description": "A fresh execution of the archived final revision. The animation contains actual velocity snapshots from the time integration; the original grid and final time are retained.",
+      "image": "assets/results/cylinder.png",
+      "metrics": {
+        "Solver execution": "9.62 s",
+        "Grid": "220 × 120",
+        "Final time": "20",
+        "Reynolds number": "100",
+        "Snapshots": "66",
+        "Maximum final speed": "1.5221",
+        "Max divergence, all cells": "4.309e+01",
+        "Max divergence, outside cylinder": "1.977e-01"
+      },
+      "source_sha256": "d6a03f4cdf9e5db922756bf1846a7fd5bbfeb8b70c32d458a6d303196daa0744",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/cylinder.txt",
+      "gif": "assets/results/cylinder.gif",
+      "note": "The unchanged archived solver has nonzero discrete divergence (see diagnostics). This is an illustrative reproduction, not a validated incompressible reference solution. Snapshot arrays are stored as float32 for display; the solver runs in its original precision."
+    },
+    {
+      "id": "sod",
+      "title": "Sod shock tube",
+      "subtitle": "Compressible flow · t = 0.2",
+      "category": "PDE",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/SodShock/GPT_ans/sample1/solu_rev_2.dat",
+      "description": "Density, velocity and pressure from one archived GPT final-revision solver, rerun on its original 400-cell grid.",
+      "image": "assets/results/sod.png",
+      "metrics": {
+        "Solver execution": "2.04 s",
+        "Grid": "400 cells",
+        "Final time": "0.200",
+        "Density range": "0.125–1.000"
+      },
+      "source_sha256": "8a6ad3b10180b898ee265df73e7296fcd7c6858b6bfb8ba3c6109b09531c705a",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/sod.txt"
+    },
+    {
+      "id": "cavity",
+      "title": "Lid-driven cavity",
+      "subtitle": "Artificial compressibility · Re = 100",
+      "category": "Flow",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Lid_Driven/GPT_ans/sample1/solu_rev_2.dat",
+      "description": "Velocity magnitude and streamlines from the archived artificial-compressibility implementation. The run's own stopping criterion and diagnostics are preserved.",
+      "image": "assets/results/cavity.png",
+      "metrics": {
+        "Solver execution": "8.66 s",
+        "Grid": "81 × 81",
+        "Iterations": "22974",
+        "Final max update": "9.983e-07",
+        "Tolerance": "1e-06"
+      },
+      "source_sha256": "296da20009f58c047632eb77b72f025420fda6bd1f01eef0c7dcdafc50ff6a89",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/cavity.txt"
+    },
+    {
+      "id": "unsteady_ns",
+      "title": "Unsteady Navier–Stokes",
+      "subtitle": "Pressure projection · t = 0.5",
+      "category": "Flow",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Unsteady_NS/GPT_ans/sample1/solu_rev_2.dat",
+      "description": "The two velocity components and pressure of the archived generated solver at its original final time. Displayed fields are illustrative outputs, not a claim of validation against the reference.",
+      "image": "assets/results/unsteady_ns.png",
+      "metrics": {
+        "Solver execution": "7.24 s",
+        "Grid": "81 × 41",
+        "Final time": "0.5",
+        "Time step": "0.002",
+        "Final divergence max": "1.100e-01"
+      },
+      "source_sha256": "6b168740b62c55858eac8fe4cc2de7d837c4833b94ff80b404e81eec95141ce0",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/unsteady_ns.txt",
+      "note": "A successful execution is not an accuracy certification. Divergence diagnostics are reported from this run; no solver correction or reference-error claim is added."
+    },
+    {
+      "id": "burgers",
+      "title": "Viscous Burgers equation",
+      "subtitle": "Nonlinear transport · t = 1",
+      "category": "PDE",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Burgers_equ/GPT_ans/sample1/solu_rev_2.dat",
+      "description": "Space–time evolution and the final velocity profile from an archived MUSCL-type limited solver with implicit diffusion.",
+      "image": "assets/results/burgers.png",
+      "metrics": {
+        "Solver execution": "0.88 s",
+        "Grid": "201 points",
+        "Final time": "1.000",
+        "Saved states": "230"
+      },
+      "source_sha256": "78928b0c181e263cd736492c2b66ca68d8fbb2e2b6831a8797e7bbb8f93c51fe",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/burgers.txt"
+    },
+    {
+      "id": "poisson",
+      "title": "Poisson / Laplace equation",
+      "subtitle": "Four-hole domain · sparse linear solve",
+      "category": "PDE",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Poisson_equ/GPT_ans/solu_rev_2.dat",
+      "description": "The archived Poisson task is a zero-source Laplace solve on a square with four circular holes. Hole interiors are masked in the presentation.",
+      "image": "assets/results/poisson.png",
+      "metrics": {
+        "Solver execution": "1.06 s",
+        "Grid": "201 × 201",
+        "Field range": "0.0000–1.0000",
+        "Linear residual L2": "5.255e-14"
+      },
+      "source_sha256": "55c94d63f9e9c82618d4a9e1eebdff44b51f99a7d9184fc4e68062a543eef3f6",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/poisson.txt"
+    },
+    {
+      "id": "helmholtz",
+      "title": "Helmholtz-type equation",
+      "subtitle": "Screened elliptic field · irregular domain",
+      "category": "PDE",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/PDEbench/Hemholtz/GPT_ans/solu_rev_2.dat",
+      "description": "A screened elliptic solve from the archive (named Poisson–Boltzmann in the generated code), on a square with four differently sized holes.",
+      "image": "assets/results/helmholtz.png",
+      "metrics": {
+        "Solver execution": "1.12 s",
+        "Grid": "201 × 201",
+        "Field range": "-0.7107–1.3410",
+        "Linear residual L2": "3.411e-03"
+      },
+      "source_sha256": "d2be84a4a7943244eb661db4c4bc3be00ee847f4579c1d67d44539eff58ad174",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/helmholtz.txt"
+    },
+    {
+      "id": "hilbert",
+      "title": "Hilbert linear systems",
+      "subtitle": "Conditioning · direct methods · regularization",
+      "category": "Linear algebra",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/Hilbert/GPT_ans/sample1/solu_rev_2.dat",
+      "description": "Forward errors and condition numbers from one generated implementation. Failed decompositions remain visible as missing values rather than being silently repaired.",
+      "image": "assets/results/hilbert.png",
+      "metrics": {
+        "Solver execution": "1.19 s",
+        "Matrix sizes": "5–50",
+        "Regularization": "1e-12",
+        "Failed original Cholesky": "8"
+      },
+      "source_sha256": "5441d76b04166a1fc344622a4293b332632b5494158eba15da5d5c6edd0f4151",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/hilbert.txt"
+    },
+    {
+      "id": "keyhole",
+      "title": "Keyhole scaling",
+      "subtitle": "Dimensionless-group search · archived dataset",
+      "category": "Dimensional analysis",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/Keyhole/GPT_ans/solu_rev_2.dat",
+      "description": "The archived rational-exponent search and log–log regression rerun on dataset_keyhole.csv. R² describes the fitted dataset; it is not a held-out score.",
+      "image": "assets/results/keyhole.png",
+      "metrics": {
+        "Solver execution": "3.12 s",
+        "Samples": "90",
+        "In-sample R²": "0.9510"
+      },
+      "source_sha256": "cdbd80a03f745ed6227c167ef4f7ad0b7a951dffa56adef57e3f5f2aebaee074",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/keyhole.txt"
+    },
+    {
+      "id": "rayleigh",
+      "title": "Rayleigh–Bénard scaling",
+      "subtitle": "Candidate groups · log–log regression",
+      "category": "Dimensional analysis",
+      "source": "src/ipynb_ver/sample_results/_3Programmers_for_Reproduction/Rayleigh/GPT_ans/solu_rev_2.dat",
+      "description": "The archived dimensionless-group candidate search rerun on dataset_rayben.csv. R² describes the fitted dataset; it is not a held-out score.",
+      "image": "assets/results/rayleigh.png",
+      "metrics": {
+        "Solver execution": "2.94 s",
+        "Samples": "182",
+        "Candidates": "128",
+        "In-sample R²": "0.9923"
+      },
+      "source_sha256": "2836a30bb7238b6eea58b6f3390e1be5667223fdb896bcd6b4cb0a97d8ec8df2",
+      "numerical_modifications": "None; original algorithm, grid and final time retained.",
+      "execution_log": "assets/results/logs/rayleigh.txt"
+    }
+  ],
+  "failures": []
+}

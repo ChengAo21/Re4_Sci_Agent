@@ -9,7 +9,7 @@ from llm_core import llm_call_
 def llm_call_c1(state: State):
     start_time = time.perf_counter()
     display(Markdown(f"### 🛌🏻 pdeAgent with Multi-Modal Review"))
-    collapsible_mardown("Configs 🏷️", f"MaxCount: {MAX_ITERATIONS}\nImageReview: {MULTI_MODAL_REVIEW}\nAPIkey: sk-0kWZkCND4QyB0rXz6IgzuurYoI4KsaDCphH2juRTTjV2Sjgl\nPlanNum: {ALTERNATIVE_NUM}\nMaxRevComs: {MAX_COMMENTS}\nConsModule_ON: {ConsModule_ON}\nCUT_OUTEXT: {CUT_OUTEXT}")
+    collapsible_mardown("Configs 🏷️", f"MaxCount: {MAX_ITERATIONS}\nImageReview: {MULTI_MODAL_REVIEW}\nPlanNum: {ALTERNATIVE_NUM}\nMaxRevComs: {MAX_COMMENTS}\nConsModule_ON: {ConsModule_ON}\nCUT_OUTEXT: {CUT_OUTEXT}")
     log_entry = None
     if ConsModule_ON:
         display(Markdown("### 🧠 Consultant:"))

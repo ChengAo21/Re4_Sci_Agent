@@ -1,0 +1,35 @@
+Loading and validating data...
+Data preview:
+      case source    etaP   Vs  ...      Lm         e         Ke        e*
+0  keyhole   Mat1   45.62  0.4  ...  286000  0.000033   4.127513  0.694905
+1  keyhole   Mat1   64.64  0.4  ...  286000  0.000085   5.848969  1.796282
+2  keyhole   Mat1   84.68  0.4  ...  286000  0.000130   7.662082  2.745032
+3  keyhole   Mat1  124.86  0.4  ...  286000  0.000227  11.296977  4.774021
+4  keyhole   Mat1  142.17  0.4  ...  286000  0.000259  12.863577  5.459368
+
+[5 rows x 15 columns]
+
+Columns in data:
+['case', 'source', 'etaP', 'Vs', 'r0', 'alpha', 'rho', 'cp', 'Tv-T0', 'Lv', 'Tl-T0', 'Lm', 'e', 'Ke', 'e*']
+Data shape: (90, 15)
+
+Starting grid search over free exponents d and g...
+Grid search progress: 50/169 combinations evaluated...Grid search progress: 100/169 combinations evaluated...Grid search progress: 150/169 combinations evaluated...Grid search progress: 169/169 combinations evaluated...
+Grid search completed.
+
+Optimal dimensionless group exponents (normalized by Vs exponent = 1):
+  etaP: -2 (-2.000)
+  Vs: 1 (1.000)
+  r0: 3 (3.000)
+  alpha: 1 (1.000)
+  rho: 2 (2.000)
+  cp: 2 (2.000)
+  Tl_T0: 2 (2.000)
+
+Linear regression model (log-log scale):
+  log(e*) = -0.6440 * log(Pi) + -3.2352
+Coefficient of determination R^2 = 0.9510
+
+Residuals statistics (log scale):
+  Mean residual: 2.2451e-16
+  Std residual:  2.2234e-01

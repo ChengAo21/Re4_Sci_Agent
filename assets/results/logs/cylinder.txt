@@ -1,0 +1,17 @@
+Building operators...
+Nx=220 Ny=120 dx=0.0500 dy=0.0500 dt=0.02252 steps=888
+Factorizing velocity matrices...
+Factorizing pressure Poisson...
+Starting time-stepping...
+Step 88/888 (9%) t=1.982 umax=1.496 KE=34.53532
+Step 176/888 (19%) t=3.964 umax=1.459 KE=35.30346
+Step 264/888 (29%) t=5.946 umax=1.435 KE=35.95108
+Step 352/888 (39%) t=7.928 umax=1.479 KE=36.52780
+Step 440/888 (49%) t=9.910 umax=1.486 KE=37.12368
+Step 528/888 (59%) t=11.892 umax=1.491 KE=37.85590
+Step 616/888 (69%) t=13.874 umax=1.539 KE=38.46993
+Step 704/888 (79%) t=15.856 umax=1.696 KE=40.01608
+Step 792/888 (89%) t=17.838 umax=1.660 KE=40.11593
+Step 880/888 (99%) t=19.820 umax=1.512 KE=38.53156
+Step 888/888 (100%) t=20.000 umax=1.517 KE=38.83548
+Saved figure to velocity_magnitude.png

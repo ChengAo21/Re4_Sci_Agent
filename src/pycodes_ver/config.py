@@ -9,18 +9,16 @@ ConsModule_ON = True # 是否启用 Consultant 模块
 CUT_OUTEXT = 2000  # 截断输出文本的最大字符数 
 
 # 设置工作区
-WORKSPACE = "./workspace"
+WORKSPACE = os.environ.get("RE4_WORKSPACE", "./workspace")
 os.makedirs(WORKSPACE, exist_ok=True)
 
 # API 设置
-Cons_name = "gpt-4.1-mini"  # Consultant
-Rev_name = "gpt-4.1-mini"   # Reviewer
+Cons_name = os.environ.get("RE4_CONSULTANT_MODEL", os.environ.get("RE4_MODEL", "gpt-4.1-mini"))
+Rev_name = os.environ.get("RE4_REVIEWER_MODEL", os.environ.get("RE4_MODEL", "gpt-4.1-mini"))
 
-PROG_name = "gpt-4.1-mini"  # or deepseek-reasoner / gemini
+PROG_name = os.environ.get("RE4_PROGRAMMER_MODEL", os.environ.get("RE4_MODEL", "gpt-4.1-mini"))
 
 
-os.environ['OPENAI_API_KEY'] = 'sk-chatanywhere-yourkeyhere'
-os.environ['OPENAI_API_BASE'] = 'https://api.chatanywhere.tech/v1'
+# Supply OPENAI_API_KEY through your environment; never store credentials here.
+OPENAI_API_BASE = os.environ.get("RE4_API_BASE", os.environ.get("OPENAI_BASE_URL", os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")))
 
-# os.environ['OPENAI_API_KEY'] = 'sk-deepseek-yourkeyhere'
-# os.environ['OPENAI_API_BASE'] = 'https://api.deepseek.com'

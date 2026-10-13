@@ -1,0 +1,10 @@
+1D Burgers equation solved on domain x in [-1.0,1.0], t in [0.0,1.0]
+Spatial points: 201
+Final time reached: 1.00000
+Final time step size dt: 2.62154e-03
+Spatial step size dx: 1.00000e-02
+Viscosity nu = 3.18310e-03
+Initial max velocity magnitude: 1.00000e+00
+Final max velocity magnitude: 6.97830e-01
+Saved 230 solution snapshots for contour plotting.
+Figures saved as 'burgers_velocity_contour.png' and 'burgers_velocity_profile_final.png'.
