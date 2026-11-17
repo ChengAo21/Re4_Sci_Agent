@@ -1,6 +1,6 @@
 # Deploy the Streamlit workspace
 
-The app is ready for local execution and Docker-based hosting. The default deployment shows regenerated results and archived interactions without API credentials. This copied working directory has no Git remote configured; the launch and build commands do not initialize or publish a repository.
+The app is ready for local execution and Docker-based hosting. The default deployment shows regenerated results and archived interactions without API credentials.
 
 ## Streamlit Community Cloud
 

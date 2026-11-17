@@ -6,13 +6,12 @@
 
 **From a scientific question to executable code — with the numerical decisions in view.**
 
-[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](docs/streamlit.md)
-[![Live demo](https://img.shields.io/badge/Live_demo-Open_app-FF4B4B?logo=streamlit&logoColor=white)](https://re4-agent.streamlit.app/)
-[![Streamlit](https://img.shields.io/badge/Interface-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](docs/streamlit.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-14b8a6.svg)](LICENSE)
-[![Paper](https://img.shields.io/badge/AI%26PDE%202026-Paper-6253d9.svg)](https://openreview.net/forum?id=PMdr3fQpBE)
+[![MLST 2026 Paper](https://img.shields.io/badge/MLST%202026-Paper-6253d9.svg)](https://doi.org/10.1088/2632-2153/aebb8b)
+[![Streamlit Web App](https://img.shields.io/badge/Streamlit-Web%20App-FF4B4B?logo=streamlit&logoColor=white)](https://re4-agent.streamlit.app/)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](docs/streamlit.md)
+[![MIT License](https://img.shields.io/badge/License-MIT-14b8a6.svg)](LICENSE)
 
-[Live demo](https://re4-agent.streamlit.app/) · [Explore the results](#results-from-the-archived-code) · [Run locally](#try-the-streamlit-app) · [Deploy](docs/deployment.md) · [Reproduce](docs/results_provenance.md) · [Cite](#citation)
+[Open Re4 Lab](https://re4-agent.streamlit.app/) · [Explore the results](#results-from-the-archived-code) · [Run locally](#try-the-streamlit-app) · [Deploy](docs/deployment.md) · [Reproduce](docs/results_provenance.md) · [Cite](#citation)
 
 </div>
 
@@ -37,9 +36,11 @@ Temporal snapshots regenerated from an archived final-revision program.
 
 These are **selected regenerated examples**, not aggregate benchmark measurements. Each image is linked to its archived source and execution details in the [result provenance](docs/results_provenance.md). The Streamlit gallery exposes the corresponding code and available outputs; the replay view shows archived attempts and reviewer feedback. An executable program or a plausible plot alone does not establish numerical correctness.
 
-## Try the Streamlit app
+## Try the Streamlit App
 
-Open the [hosted Streamlit app](https://re4-agent.streamlit.app/) to explore the workspace, or follow the local setup below.
+Open [Re4 Lab](https://re4-agent.streamlit.app/), the hosted Streamlit web app, to explore the workspace.
+
+![About Re4 in the Streamlit web app, featuring the workspace navigation and the four-stage agent workflow](docs/screenshots/re4-lab.png)
 
 The default app works **without an API key**.
 
@@ -97,15 +98,19 @@ The Streamlit interface, repository documentation, and visualization tooling wer
 
 ## Citation
 
-The workshop paper is available on [OpenReview](https://openreview.net/forum?id=PMdr3fQpBE). If this repository helps your research, please cite:
+If you use Re4 in your research, please cite the [journal article published in *Machine Learning: Science and Technology*](https://doi.org/10.1088/2632-2153/aebb8b).
 
 ```bibtex
-@inproceedings{cheng2026re,
-  title={Re4: Scientific Computing Agent with Rewriting, Resolution, Review and Revision},
-  author={Ao Cheng and Lei Zhang and Guowei He},
-  booktitle={AI&PDE: ICLR 2026 Workshop on AI and Partial Differential Equations},
-  year={2026},
-  url={https://openreview.net/forum?id=PMdr3fQpBE}
+@article{cheng2026re,
+  author  = {Cheng, A. and Zhang, L. and He, G.-W.},
+  title   = {{Re4}: scientific computing agent with rewriting, resolution, review and revision},
+  journal = {Mach. Learn.: Sci. Technol.},
+  year    = {2026},
+  volume  = {7},
+  number  = {6},
+  pages   = {065016},
+  doi     = {10.1088/2632-2153/aebb8b},
+  url     = {https://doi.org/10.1088/2632-2153/aebb8b}
 }
 ```
 

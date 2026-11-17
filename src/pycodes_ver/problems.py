@@ -48,6 +48,7 @@ The boundary conditions are:
 (u,v) = (\alpha(x(1-x)), 0) &(x,y) \in \Gamma_1\\
 (u,v) = (0,0) &(x,y) \in \Gamma_2\\
 \text{Reference pressure: } p(0,0) = 0\\
+\text{Zero normal pressure gradient: } \frac{\partial p}{\partial n} = 0, \quad (x,y) \in \partial\Omega
 \end{cases}
 where $\alpha$ is 2. Implement a stable and efficient method to solve this problem.
 Plot the contour of the velocity magnitude using the 'RdBu_r' colormap, overlaid with streamlines, and the convergence history in one figure.
@@ -75,8 +76,8 @@ in the interval \( x \in [0,1] \), where \( E = \frac{1}{2} u^2 + \frac{p}{(\gam
 At \( t = 0 \), the initial condition is
 (\rho, u, p) = 
 \begin{cases}
-(1.0, 0.0, 1.0), & 0 < x \leq 0.5, \\
-(0.125, 0.0, 0.1), & 0.5 \leq x < 1,
+(1.0, 0.0, 1.0), & 0 \leq x \leq 0.5, \\
+(0.125, 0.0, 0.1), & 0.5 < x \leq 1,
 \end{cases}
 
 Implement a stable and efficient method to solve this problem.
@@ -156,7 +157,7 @@ u = 1,\, x \in \partial \Omega_{\text{rec}} \\
 \end{cases}
 
 Implement a stable and efficient method to solve this problem.
-Plot the contours of the velocity magnitude in one figure using 'RdBu_r' colormap, and mark the circles in the plot.
+Plot the contours of the scalar solution \(u(x,y)\) in one figure using 'RdBu_r' colormap, and mark the circles in the plot.
 Just save figs do not use plt.show() in the code.
 
 [HINTS]:
@@ -168,7 +169,7 @@ Print necessary solving information to facilitate the reliability check of the s
 
 
 helmholtz_problem = r"""
-The PDE of Poisson-Boltzmann(Helmholtz) 2D equation is given by:
+The 2-D Helmholtz equation is
 \begin{equation}
 -\Delta u + k^2 u = f(x,y)
 \end{equation}
@@ -218,17 +219,17 @@ The governing PDEs for 2D incompressible flow around a cylinder are given by:
 
 The computational domain \Omega is a rectangle with:
 \begin{cases}
-Cylinder diameter d = 1.0 (Normalized length scale)\
-Distance from cylinder center to left boundary: x_1 = 3.0\
-Distance from cylinder center to right boundary: x_2 = 8.0\
-Distance from cylinder center to top/bottom boundaries: y_1 = y_2 = 3.0\
+Cylinder diameter d = 1.0 (Normalized length scale)\\
+Distance from cylinder center to left boundary: x_1 = 3.0\\
+Distance from cylinder center to right boundary: x_2 = 8.0\\
+Distance from cylinder center to top/bottom boundaries: y_1 = y_2 = 3.0\\
 Total domain size: (x_1 + x_2) \times (y_1 + y_2)\
 \end{cases}
 The boundary conditions are:
 \begin{cases}
-Inlet \Gamma_{in} (left): (u,v) = (1, 0) constant inflow\
-Walls \Gamma_{top} \cup \Gamma_{bottom}: (u,v) with \frac{\partial u}{\partial y}=0, v=0 (Free-slip condition)\
-Cylinder Surface: No-slip condition\
+Inlet \Gamma_{in} (left): (u,v) = (1, 0) constant inflow\\
+Walls \Gamma_{top} \cup \Gamma_{bottom}: (u,v) with \frac{\partial u}{\partial y}=0, v=0 (Free-slip condition)\\
+Cylinder Surface: No-slip condition\\
 Outlet \Gamma_{out}: zero pressure gradient\
 \end{cases}
 The Reynolds number Re = 100 (Based on diameter and inlet velocity). 
@@ -275,12 +276,12 @@ the effective laser power ('etaP'), the laser scan speed ('Vs'), the laser beam 
 The target variable for fitting is the keyhole aspect ratio (e*).
 Based on dimensional analysis and using the data in the file, identify the optimal dimensionless quantity formed by combining these parameters, which exhibits the highest coefficient of determination (R-squared) for predicting keyhole aspect ratio.
 
-Implement a roubust and reliable method from scratch for this data-driven dimensional analysis. 
-Ensure that the the resulting dimensionless exponents are normalized by V_s and that the exponents of physical quantities be integers or rational fractions with absolute values not exceeding 3.
+Implement a robust and reliable method from scratch for this data-driven dimensional analysis.
+Ensure that the resulting dimensionless exponents are normalized by V_s. The exponents of physical quantities must be integers or rational fractions with absolute values not exceeding 3.
 
 [HINTS]:
 Plot one figure with linear scale for both axes to visualize the correlation between the optimal dimensionless quantity and e*.
-Print the dinmensional Matrix. Just save figs do not use plt.show() in the code.
+Print the dimensional Matrix. Just save figs do not use plt.show() in the code.
 """
 
 
@@ -294,10 +295,10 @@ the height of the container ('h'), the thermal conductivity ('lambda'), the temp
 The target variable for fitting is the Nusselt number (Nu).
 Based on dimensional analysis and using the data in the file, identify the optimal dimensionless quantity formed by combining these parameters, which exhibits the highest coefficient of determination (R-squared) for predicting Nu.
 
-Implement a roubust and reliable method from scratch for this data-driven dimensional analysis. 
-Ensure that the the resulting dimensionless exponents are normalized by 'alpha' and that the exponents of physical quantities be integers or rational fractions with absolute values not exceeding 3.
+Implement a robust and reliable method from scratch for this data-driven dimensional analysis.
+Ensure that the resulting dimensionless exponents are normalized by 'alpha'. The exponents of physical quantities must be integers or rational fractions with absolute values not exceeding 3.
 
 [HINTS]:
 Plot one figure with linear scale for both axes to visualize the correlation between the optimal dimensionless quantity and Nu.
-Print the dinmensional Matrix. Just save figs do not use plt.show() in the code.
+Print the dimensional Matrix. Just save figs do not use plt.show() in the code.
 """

@@ -391,7 +391,12 @@ def live_lab() -> None:
         from re4_ui.live import LiveSettings, problems, run_pipeline
         presets = problems()
         names = list(presets)
-        task_name = st.selectbox("Original task prompt", names, index=names.index("burgers_problem") if "burgers_problem" in names else 0)
+        task_name = st.selectbox(
+            "Original task prompt",
+            names,
+            index=names.index("burgers_problem") if "burgers_problem" in names else 0,
+            format_func=lambda name: "Poisson equation" if name == "poison_problem" else name,
+        )
         with st.form("live_settings"):
             problem = st.text_area("Problem statement", presets[task_name], height=230)
             st.markdown("#### API connection")
